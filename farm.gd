@@ -87,10 +87,26 @@ var _game_time := 0.0   # 游戏内累计秒数，用于保护期判断
 # Auth state (set from Login scene)
 var auth_token := ""
 var user_info := {}
-const API_BASE := "http://localhost:8080/api/v1"
 var http: HTTPRequest
 var _save_pending := false   # 云端保存中
 var _http_cb: Callable = Callable()  # 当前HTTP回调
+
+# Camera 拖拽缩放
+var cam: Camera2D
+var _cam_dragging := false
+var _cam_drag_start := Vector2.ZERO
+var _cam_start_pos := Vector2.ZERO
+var _cam_min_zoom := 1.0  # 由 _fit_camera_to_screen 动态更新
+# 触屏状态
+var _touch_count := 0
+var _touch_positions := {}  # {finger_index: Vector2}
+var _pinch_start_dist := 0.0
+var _pinch_start_zoom := 1.0
+var _touch_pan_start := Vector2.ZERO
+var _touch_cam_start := Vector2.ZERO
+# UI 绘制目标（CanvasLayer 子节点，画在屏幕坐标系）
+var _ui_draw_target: CanvasItem = null
+var _ui_overlay: Control = null
 
 # 肥料系统
 # [名称, 金币价, 类型, 效果值, 可用阶段列表, 每株上限, max_minutes_limit]
@@ -118,6 +134,11 @@ func _ready():
 	http = HTTPRequest.new()
 	http.timeout = 10.0
 	add_child(http)
+
+	# Camera for pan/zoom
+	cam = Camera2D.new()
+	add_child(cam)
+	cam.make_current()
 
 	CROPS = [
 		# [0]名称,[1]种子价,[2]旧售价,[3]成熟秒,[4]key,
@@ -152,6 +173,62 @@ func _ready():
 	_load_game()
 	_apply_tool_cursor()
 	_init_overlays()
+	_setup_camera()
+	# 设置 UIOverlay 引用，让 UI 在 CanvasLayer 上独立绘制
+	_ui_overlay = get_node_or_null("UILayer/UIOverlay")
+	if _ui_overlay:
+		_ui_overlay.farm_ref = self
+
+func _setup_camera():
+	cam.position = Vector2(500.0, 530.0)
+	cam.position_smoothing_enabled = false
+	_fit_camera_to_screen()
+	cam.position_smoothing_enabled = true
+	cam.position_smoothing_speed = 8.0
+	get_viewport().size_changed.connect(_fit_camera_to_screen)
+
+# 等比缩放：viewport 宽高比 >= 场景宽高比 时以宽为准，否则以高为准
+func _fit_camera_to_screen():
+	var vp: Vector2 = get_viewport().get_visible_rect().size
+	var bg := get_node_or_null("Background")
+	if bg == null or not (bg is Sprite2D) or bg.texture == null:
+		return
+	var scene_size: Vector2 = bg.texture.get_size()
+	# viewport 宽高比 vs 场景宽高比
+	var vp_ratio: float = vp.x / vp.y
+	var scene_ratio: float = scene_size.x / scene_size.y
+	if vp_ratio >= scene_ratio:
+		_cam_min_zoom = vp.x / scene_size.x * 1.1
+	else:
+		_cam_min_zoom = vp.y / scene_size.y * 1.1
+	cam.zoom = Vector2.ONE * _cam_min_zoom
+	cam.position = scene_size * 0.5
+	_clamp_camera()
+
+# 未填满的轴居中，填满的轴超出时允许平移
+func _clamp_camera():
+	if cam == null:
+		return
+	var vp: Vector2 = get_viewport().get_visible_rect().size
+	var bg := get_node_or_null("Background")
+	if bg == null or not (bg is Sprite2D) or bg.texture == null:
+		return
+	var scene_size: Vector2 = bg.texture.get_size()
+	var scene_center: Vector2 = scene_size * 0.5
+	var visible_w: float = vp.x / cam.zoom.x
+	var visible_h: float = vp.y / cam.zoom.y
+	# X轴：场景宽 >= 可见宽时允许平移，否则居中
+	if scene_size.x >= visible_w:
+		var half: float = visible_w * 0.5
+		cam.position.x = clampf(cam.position.x, half, scene_size.x - half)
+	else:
+		cam.position.x = scene_center.x
+	# Y轴：场景高 >= 可见高时允许平移，否则居中
+	if scene_size.y >= visible_h:
+		var half: float = visible_h * 0.5
+		cam.position.y = clampf(cam.position.y, half, scene_size.y - half)
+	else:
+		cam.position.y = scene_center.y
 
 func _init_overlays():
 	# ---- ShopOverlay ----
@@ -177,19 +254,23 @@ func _init_overlays():
 		shop.queue_redraw()
 	)
 	shop.fertilizer_buy_requested.connect(func(fi: int):
-		var fert: Array = FERTILIZERS[fi]
-		var cost: int = int(fert[1])
-		if gold >= cost:
-			gold -= cost
-			if not fertilizer_inventory.has(fi):
-				fertilizer_inventory[fi] = 0
-			fertilizer_inventory[fi] = fertilizer_inventory[fi] + 1
-			selected_fertilizer = fi
-			toast_text = "购买 " + str(fert[0]) + " 成功!"
-			toast_timer = 1.5
+		if not auth_token.is_empty():
+			_send_action("buy_fertilizer", {"fert_id": fi})
 		else:
-			toast_text = "金币不足!"
-			toast_timer = 1.5
+			# 离线模式：本地扣金币
+			var fert: Array = FERTILIZERS[fi]
+			var cost: int = int(fert[1])
+			if gold >= cost:
+				gold -= cost
+				if not fertilizer_inventory.has(fi):
+					fertilizer_inventory[fi] = 0
+				fertilizer_inventory[fi] = fertilizer_inventory[fi] + 1
+				selected_fertilizer = fi
+				toast_text = "购买 " + str(fert[0]) + " 成功!"
+				toast_timer = 1.5
+			else:
+				toast_text = "金币不足!"
+				toast_timer = 1.5
 		_sync_shop_data(shop)
 		shop.queue_redraw()
 	)
@@ -221,9 +302,9 @@ func _init_overlays():
 		)
 		inv.sell_all_requested.connect(func():
 			if not auth_token.is_empty():
-				# TODO: sell_all via server
-				pass
-			_sell_all_inventory()
+				_send_action("sell_all")
+			else:
+				_sell_all_inventory()
 			inv.inventory = inventory
 			inv.queue_redraw()
 		)
@@ -259,10 +340,21 @@ func _sync_shop_data(shop):
 	shop.selected_seed = selected_seed
 	shop.selected_fertilizer = selected_fertilizer
 
+func _sync_all_overlays():
+	# Refresh any open overlay with latest state
+	var shop := get_node_or_null("ShopOverlay")
+	if shop and shop_open:
+		_sync_shop_data(shop)
+		shop.queue_redraw()
+	var inv := get_node_or_null("InventoryOverlay")
+	if inv and inventory_open:
+		inv.inventory = inventory
+		inv.queue_redraw()
+
 func _send_sell(crop_id: int, count: int):
-	if count <= 0:
+	if count <= 0 or not is_instance_valid(http):
 		return
-	var url := API_BASE + "/farm/sell"
+	var url := ApiConfig.API_BASE + "/farm/sell"
 	var headers := ["Content-Type: application/json", "Authorization: Bearer " + auth_token]
 	var body := JSON.stringify({"crop_id": crop_id, "count": count})
 	var cb := func(result: int, response_code: int, _h: PackedStringArray, b: PackedByteArray):
@@ -378,6 +470,10 @@ func _init_sandy_base():
 func iso2screen(c: int, r: int) -> Vector2:
 	return Vector2(OX + (c - r) * TW * 0.5, OY + (c + r) * TH * 0.5)
 
+# 屏幕坐标 → 世界坐标（用于地块点击检测）
+func _screen_to_world(screen_pos: Vector2) -> Vector2:
+	return get_viewport().get_canvas_transform().affine_inverse() * screen_pos
+
 func _get_plot_position(c: int, r: int) -> Vector2:
 	var anchors := get_node_or_null(PLOT_ANCHORS_PATH)
 	if anchors != null:
@@ -463,9 +559,13 @@ func in_diamond(px: float, py: float, cx: float, cy: float) -> bool:
 	return absf(px - cx) / (TW * 0.5) + absf(py - cy) / (TH * 0.5) <= 1.0
 
 func _process(delta: float):
+	if farm.is_empty() or farm.size() < ROWS:
+		return
 	_game_time += delta
 
 	for r in range(ROWS):
+		if farm[r].size() < COLS:
+			return
 		for c in range(COLS):
 			var cell: Dictionary = farm[r][c]
 			if not _is_cell_unlocked(cell):
@@ -499,6 +599,8 @@ func _process(delta: float):
 		if toast_timer <= 0.0:
 			toast_text = ""
 	queue_redraw()
+	if _ui_overlay and is_instance_valid(_ui_overlay):
+		_ui_overlay.queue_redraw()
 
 func _get_crop_stage_enum(prog: float) -> int:
 	if prog < 0.18:
@@ -569,6 +671,10 @@ func _notification(what: int):
 
 func _exit_tree():
 	Input.set_custom_mouse_cursor(null)
+	# 在节点释放前断开 HTTP 回调，防止回调访问已释放的节点
+	if is_instance_valid(http) and _http_cb.is_valid() and http.request_completed.is_connected(_http_cb):
+		http.request_completed.disconnect(_http_cb)
+	_http_cb = Callable()
 
 func _set_tool_mode(mode: int):
 	tool_mode = clampi(mode, 0, TOOL_ICON_TEXTURES.size() - 1)
@@ -615,6 +721,95 @@ func _unhandled_input(event: InputEvent):
 			queue_redraw()
 			return
 
+	# ---- 触屏：手指按下/抬起 ----
+	if event is InputEventScreenTouch:
+		if event.pressed:
+			_touch_positions[event.index] = event.position
+			_touch_count += 1
+			if _touch_count == 1:
+				# 单指按下：准备拖拽
+				_touch_pan_start = event.position
+				_touch_cam_start = cam.position
+			elif _touch_count == 2:
+				# 双指按下：准备缩放
+				var keys := _touch_positions.keys()
+				var p0: Vector2 = _touch_positions[keys[0]]
+				var p1: Vector2 = _touch_positions[keys[1]]
+				_pinch_start_dist = p0.distance_to(p1)
+				_pinch_start_zoom = cam.zoom.x
+		else:
+			if _touch_count == 1 and event.index in _touch_positions:
+				# 单指抬起：如果没有明显移动，当作点击
+				var moved: float = _touch_positions[event.index].distance_to(event.position)
+				if moved < 15.0:
+					_handle_click(event.position)
+			_touch_positions.erase(event.index)
+			_touch_count = _touch_positions.size()
+		return
+
+	# ---- 触屏：手指移动 ----
+	if event is InputEventScreenDrag:
+		_touch_positions[event.index] = event.position
+		if _touch_count == 1:
+			# 单指拖拽：平移相机
+			var delta_screen: Vector2 = _touch_pan_start - event.position
+			var delta_world: Vector2 = delta_screen / cam.zoom
+			cam.position = _touch_cam_start + delta_world
+			_clamp_camera()
+			queue_redraw()
+		elif _touch_count == 2:
+			# 双指缩放
+			var keys := _touch_positions.keys()
+			var p0: Vector2 = _touch_positions[keys[0]]
+			var p1: Vector2 = _touch_positions[keys[1]]
+			var dist: float = p0.distance_to(p1)
+			if _pinch_start_dist > 0:
+				var ratio: float = dist / _pinch_start_dist
+				cam.zoom = Vector2.ONE * clampf(_pinch_start_zoom * ratio, _cam_min_zoom, 3.0)
+				_clamp_camera()
+				queue_redraw()
+		return
+
+	# ---- Camera: 中键/右键拖拽平移 ----
+	if event is InputEventMouseButton and (event.button_index == MOUSE_BUTTON_MIDDLE or event.button_index == MOUSE_BUTTON_RIGHT):
+		_cam_dragging = event.pressed
+		if _cam_dragging:
+			_cam_drag_start = event.position
+			_cam_start_pos = cam.position
+		return
+
+	if event is InputEventMouseMotion and _cam_dragging:
+		var delta_screen: Vector2 = _cam_drag_start - event.position
+		var delta_world: Vector2 = delta_screen / cam.zoom
+		cam.position = _cam_start_pos + delta_world
+		# 限制平移范围，保持地块在视野内
+		_clamp_camera()
+		queue_redraw()
+		return
+
+	# ---- Camera: 滚轮缩放（以鼠标位置为中心） ----
+	if event is InputEventMouseButton and event.pressed:
+		if event.button_index == MOUSE_BUTTON_WHEEL_UP or event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+			var vp: Vector2 = get_viewport().get_visible_rect().size
+			var old_zoom := cam.zoom.x
+			if event.button_index == MOUSE_BUTTON_WHEEL_UP:
+				cam.zoom *= 1.1
+			else:
+				cam.zoom /= 1.1
+			cam.zoom = cam.zoom.clampf(_cam_min_zoom, 3.0)
+			var new_zoom := cam.zoom.x
+			if new_zoom != old_zoom:
+				# 以鼠标位置为中心缩放：计算鼠标在世界坐标中的位置，缩放后保持不变
+				var vp_center: Vector2 = vp * 0.5
+				var mouse_offset: Vector2 = event.position - vp_center
+				var world_offset: Vector2 = mouse_offset / old_zoom
+				cam.position += world_offset * (1.0 - old_zoom / new_zoom)
+			_clamp_camera()
+			queue_redraw()
+			return
+
+	var vp: Vector2 = get_viewport().get_visible_rect().size
+
 	# --- Mouse button up ---
 	if event is InputEventMouseButton and not event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		mouse_held = false
@@ -624,15 +819,16 @@ func _unhandled_input(event: InputEvent):
 
 	# --- Mouse motion ---
 	if event is InputEventMouseMotion:
-		var mx: float = event.position.x
-		var my: float = event.position.y
-		# Hover tracking
+		# 地块 hover 用世界坐标
+		var wp := _screen_to_world(event.position)
+		var wx: float = wp.x
+		var wy: float = wp.y
 		hover_col = -1
 		hover_row = -1
 		for row in range(ROWS):
 			for col in range(COLS):
 				var sp := _get_plot_position(col, row)
-				if in_diamond(mx, my, sp.x, sp.y):
+				if in_diamond(wx, wy, sp.x, sp.y):
 					hover_col = col
 					hover_row = row
 					break
@@ -651,9 +847,13 @@ func _unhandled_input(event: InputEvent):
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		var mx: float = event.position.x
 		var my: float = event.position.y
+		# 地块点击用世界坐标
+		var wp := _screen_to_world(event.position)
+		var wx: float = wp.x
+		var wy: float = wp.y
 		mouse_held = false  # only set true if click is on the grid
 
-		# Check reclaim confirmation overlay
+		# Check reclaim confirmation overlay (屏幕坐标)
 		if reclaim_confirm_open:
 			var reclaim_rect := _get_reclaim_confirm_rect()
 			var cancel_rect := Rect2(reclaim_rect.position.x + 40, reclaim_rect.position.y + 145, 130, 34)
@@ -670,9 +870,9 @@ func _unhandled_input(event: InputEvent):
 				return
 			return
 
-		# Check shovel-all confirmation overlay
+		# Check shovel-all confirmation overlay (屏幕坐标)
 		if shovel_all_confirm_open:
-			var sa_rect := Rect2(VIEW_W * 0.5 - 200, VIEW_H * 0.5 - 80, 400, 160)
+			var sa_rect := Rect2(vp.x * 0.5 - 200, vp.y * 0.5 - 80, 400, 160)
 			var sa_cancel := Rect2(sa_rect.position.x + 40, sa_rect.position.y + 120, 130, 30)
 			var sa_confirm := Rect2(sa_rect.position.x + sa_rect.size.x - 170, sa_rect.position.y + 120, 130, 30)
 			if not _point_in_rect(Vector2(mx, my), sa_rect):
@@ -685,15 +885,15 @@ func _unhandled_input(event: InputEvent):
 				return
 			return
 
-		# Check warehouse overlay
+		# Check warehouse overlay (屏幕坐标)
 		if warehouse_open:
 			var ww := 360.0; var wh := 300.0
-			var wx := (VIEW_W - ww) / 2; var wy := (VIEW_H - wh) / 2
-			if mx < wx or mx > wx + ww or my < wy or my > wy + wh:
+			var wox := (vp.x - ww) / 2; var woy := (vp.y - wh) / 2
+			if mx < wox or mx > wox + ww or my < woy or my > woy + wh:
 				warehouse_open = false; queue_redraw(); return
 			return
 
-		# Check reset confirmation overlay
+		# Check reset confirmation overlay (屏幕坐标)
 		if reset_confirm_open:
 			var reset_rect := _get_reset_confirm_rect()
 			var reset_cancel_rect := Rect2(reset_rect.position.x + 50, reset_rect.position.y + 165, 150, 36)
@@ -712,11 +912,11 @@ func _unhandled_input(event: InputEvent):
 				return
 			return
 
-		# Check grid tiles
+		# Check grid tiles (世界坐标)
 		for row in range(ROWS):
 			for col in range(COLS):
 				var sp := _get_plot_position(col, row)
-				if in_diamond(mx, my, sp.x, sp.y):
+				if in_diamond(wx, wy, sp.x, sp.y):
 					mouse_held = true
 					_do_tile_action(col, row)
 					last_action_col = col
@@ -724,12 +924,12 @@ func _unhandled_input(event: InputEvent):
 					queue_redraw()
 					return
 
-		# Top toolbar buttons (right side) — 背包 / 商店 / 设置
+		# Top toolbar buttons (right side) — 背包 / 商店 / 设置 (屏幕坐标)
 		mouse_held = false
 		var tb_btn_w := 72.0; var tb_btn_gap := 10.0
 		var tb_count := 3
 		var tb_total_w: float = tb_count * tb_btn_w + (tb_count - 1) * tb_btn_gap
-		var tb_start_x: float = VIEW_W - tb_total_w - 14
+		var tb_start_x: float = vp.x - tb_total_w - 14
 		if my >= 8 and my <= 52:
 			for i in range(tb_count):
 				var btn_x: float = tb_start_x + i * (tb_btn_w + tb_btn_gap)
@@ -757,12 +957,12 @@ func _unhandled_input(event: InputEvent):
 					queue_redraw()
 					return
 
-		# Tool mode buttons (below grid)
+		# Tool mode buttons (屏幕坐标)
 		var tb_btn_s: float = 58.0
 		var tb_btn_g: float = 8.0
 		var tb_total2: float = 10.0 * tb_btn_s + 9.0 * tb_btn_g
-		var tb_sx: float = VIEW_W * 0.5 - tb_total2 * 0.5
-		var tb_y2: float = OY + (COLS + ROWS) * TH * 0.5 + 30
+		var tb_sx: float = vp.x * 0.5 - tb_total2 * 0.5
+		var tb_y2: float = vp.y - 78.0
 		if my >= tb_y2 and my <= tb_y2 + 78:
 			for ti in range(10):
 				var bx2: float = tb_sx + ti * (tb_btn_s + tb_btn_g)
@@ -774,6 +974,8 @@ func _unhandled_input(event: InputEvent):
 					queue_redraw()
 					return
 func _do_tile_action(col: int, row: int):
+	if farm.is_empty() or row >= farm.size() or col >= farm[row].size():
+		return
 	var cell: Dictionary = farm[row][col]
 	if not _is_cell_unlocked(cell):
 		var next_locked := _get_next_locked_plot()
@@ -827,14 +1029,74 @@ func _do_tile_action(col: int, row: int):
 			warehouse_open = true
 			queue_redraw()
 
+# 触屏点击 → 模拟地块/UI 交互
+func _handle_click(screen_pos: Vector2):
+	var vp: Vector2 = get_viewport().get_visible_rect().size
+	var mx: float = screen_pos.x
+	var my: float = screen_pos.y
+	var wp := _screen_to_world(screen_pos)
+	# 确认框（复用鼠标逻辑）
+	if reclaim_confirm_open or shovel_all_confirm_open or warehouse_open or reset_confirm_open:
+		# 模拟左键点击，让已有逻辑处理
+		var fake := InputEventMouseButton.new()
+		fake.button_index = MOUSE_BUTTON_LEFT
+		fake.pressed = true
+		fake.position = screen_pos
+		_unhandled_input(fake)
+		return
+	# 地块点击（世界坐标）
+	for row in range(ROWS):
+		for col in range(COLS):
+			if farm.is_empty() or row >= farm.size() or col >= farm[row].size():
+				continue
+			var sp := _get_plot_position(col, row)
+			if in_diamond(wp.x, wp.y, sp.x, sp.y):
+				_do_tile_action(col, row)
+				queue_redraw()
+				return
+	# 工具栏按钮（屏幕坐标）
+	var tb_btn_s: float = 58.0
+	var tb_btn_g: float = 8.0
+	var tb_total: float = 10.0 * tb_btn_s + 9.0 * tb_btn_g
+	var tb_sx: float = vp.x * 0.5 - tb_total * 0.5
+	var tb_y: float = vp.y - 78.0
+	if my >= tb_y and my <= tb_y + 78:
+		for ti in range(10):
+			var bx: float = tb_sx + ti * (tb_btn_s + tb_btn_g)
+			if mx >= bx and mx <= bx + tb_btn_s:
+				_set_tool_mode(ti)
+				queue_redraw()
+				return
+	# 右上按钮
+	var tb_btn_w := 72.0; var tb_btn_gap := 10.0
+	var tb_start_x: float = vp.x - 3.0 * tb_btn_w - 2.0 * tb_btn_gap - 14
+	if my >= 8 and my <= 52:
+		for i in range(3):
+			var bx: float = tb_start_x + i * (tb_btn_w + tb_btn_gap)
+			if mx >= bx and mx <= bx + tb_btn_w:
+				match i:
+					0:
+						var shop := get_node_or_null("ShopOverlay")
+						if shop: _sync_shop_data(shop); shop.visible = true
+					1:
+						var inv := get_node_or_null("InventoryOverlay")
+						if inv: inv.inventory = inventory; inv.visible = true
+					2:
+						var setn := get_node_or_null("SettingsOverlay")
+						if setn: setn.auth_token = auth_token; setn.user_info = user_info; setn.visible = true
+				queue_redraw()
+				return
+
 # ---- Server action API ----
 func _send_action(action: String, params: Dictionary = {}):
 	if auth_token.is_empty():
 		toast_text = "未登录，无法执行操作"
 		toast_timer = 1.5
 		return
+	if not is_instance_valid(http):
+		return
 	params["action"] = action
-	var url := API_BASE + "/farm/action"
+	var url := ApiConfig.API_BASE + "/farm/action"
 	var headers := ["Content-Type: application/json", "Authorization: Bearer " + auth_token]
 	if _http_cb.is_valid() and http.request_completed.is_connected(_http_cb):
 		http.request_completed.disconnect(_http_cb)
@@ -881,6 +1143,11 @@ func _apply_state(data: Dictionary):
 	if data.has("inventory") and (data["inventory"] is Dictionary):
 		inventory = data["inventory"]
 		_normalize_inventory_keys()
+	# Update fertilizer inventory
+	if data.has("fertilizer_inventory") and (data["fertilizer_inventory"] is Dictionary):
+		fertilizer_inventory = {}
+		for k in data["fertilizer_inventory"].keys():
+			fertilizer_inventory[int(k)] = int(data["fertilizer_inventory"][k])
 	# Update plots
 	if data.has("plots") and (data["plots"] is Array):
 		for p in data["plots"]:
@@ -911,6 +1178,7 @@ func _apply_state(data: Dictionary):
 			cell["fert_used"] = clampi(int(p.get("fert_used", 0)), 0, 3)
 			cell["yield_bonus_rate"] = maxf(float(p.get("yield_bonus_rate", 0.0)), 0.0)
 			cell["yield_loss_rate"] = clampf(float(p.get("yield_loss_rate", 0.0)), 0.0, 0.30)
+	_sync_all_overlays()
 	queue_redraw()
 
 func _try_reclaim_plot(col: int, row: int):
@@ -973,10 +1241,12 @@ func _reset_save_data():
 	queue_redraw()
 
 func _get_reclaim_confirm_rect() -> Rect2:
-	return Rect2(VIEW_W * 0.5 - 210.0, VIEW_H * 0.5 - 100.0, 420.0, 200.0)
+	var vp: Vector2 = get_viewport().get_visible_rect().size
+	return Rect2(vp.x * 0.5 - 210.0, vp.y * 0.5 - 100.0, 420.0, 200.0)
 
 func _get_reset_confirm_rect() -> Rect2:
-	return Rect2(VIEW_W * 0.5 - 240.0, VIEW_H * 0.5 - 110.0, 480.0, 220.0)
+	var vp: Vector2 = get_viewport().get_visible_rect().size
+	return Rect2(vp.x * 0.5 - 240.0, vp.y * 0.5 - 110.0, 480.0, 220.0)
 
 func _point_in_rect(point: Vector2, rect: Rect2) -> bool:
 	return point.x >= rect.position.x and point.x <= rect.position.x + rect.size.x and point.y >= rect.position.y and point.y <= rect.position.y + rect.size.y
@@ -1180,9 +1450,11 @@ func _save_game(show_toast := true):
 		_cloud_save()
 
 func _cloud_save():
+	if not is_instance_valid(http):
+		return
 	_save_pending = true
 	var payload := _build_save_payload()
-	var url := API_BASE + "/farm/save"
+	var url := ApiConfig.API_BASE + "/farm/save"
 	var headers := ["Content-Type: application/json", "Authorization: Bearer " + auth_token]
 	var cb := func(result: int, response_code: int, _headers: PackedStringArray, _body: PackedByteArray):
 		_save_pending = false
@@ -1272,7 +1544,9 @@ func _load_game():
 		_restore_farm(data["farm"])
 
 func _cloud_load():
-	var url := API_BASE + "/farm/load"
+	if not is_instance_valid(http):
+		return
+	var url := ApiConfig.API_BASE + "/farm/load"
 	var headers := ["Authorization: Bearer " + auth_token]
 	var cb := func(result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray):
 		if result != HTTPRequest.RESULT_SUCCESS or response_code != 200:
@@ -1306,6 +1580,11 @@ func _apply_cloud_data(data: Dictionary):
 	if data.has("inventory") and (data["inventory"] is Dictionary):
 		inventory = data["inventory"]
 		_normalize_inventory_keys()
+	# Sync fertilizer inventory
+	if data.has("fertilizer_inventory") and (data["fertilizer_inventory"] is Dictionary):
+		fertilizer_inventory = {}
+		for k in data["fertilizer_inventory"].keys():
+			fertilizer_inventory[int(k)] = int(data["fertilizer_inventory"][k])
 	# plots 数组 → farm 二维数组
 	if data.has("plots") and (data["plots"] is Array):
 		for p in data["plots"]:
@@ -1348,6 +1627,8 @@ func _apply_cloud_data(data: Dictionary):
 				cell["fert_ids_used"] = fiu_raw if fiu_raw is Array else []
 			cell["yield_bonus_rate"] = maxf(float(p.get("yield_bonus_rate", 0.0)), 0.0)
 			cell["yield_loss_rate"] = clampf(float(p.get("yield_loss_rate", 0.0)), 0.0, 0.30)
+	_sync_all_overlays()
+	queue_redraw()
 
 func _normalize_inventory_keys():
 	var fixed := {}
@@ -1464,12 +1745,26 @@ func _apply_offline_growth(saved_at: int):
 
 # ===================== DRAW =====================
 func _draw():
+	if farm.is_empty():
+		return
+	_draw_world()
+
+func _draw_world():
+	# 计算当前可见的世界坐标范围（用于 tooltip 裁剪）
+	var vp: Vector2 = get_viewport().get_visible_rect().size
+	var ctrans := get_viewport().get_canvas_transform()
+	var w_min := ctrans.affine_inverse() * Vector2.ZERO
+	var w_max := ctrans.affine_inverse() * vp
 	# Title bar
-	draw_rect(Rect2(100, 40, 440, 40), Color(0.1, 0.06, 0.02, 0.85))
+	_d_rect(Rect2(100, 40, 440, 40), Color(0.1, 0.06, 0.02, 0.85))
 	_draw_text(200, 46, "QQ 农场 2.5D", 24, Color(1, 0.9, 0.2))
 
 	# ---- ISOMETRIC TILES: PASS 1 - Soil + borders (back to front) ----
+	if farm.size() < ROWS:
+		return
 	for row in range(ROWS):
+		if farm[row].size() < COLS:
+			return
 		for col in range(COLS):
 			var sp := _get_plot_position(col, row)
 			var cx: float = sp.x
@@ -1481,19 +1776,19 @@ func _draw():
 			# Hover glow (on soil layer)
 			if col == hover_col and row == hover_row:
 				if not _is_cell_unlocked(cell):
-					draw_colored_polygon(vcorners, Color(0.75, 0.75, 0.75, 0.22))
+					_d_colored_polygon(vcorners, Color(0.75, 0.75, 0.75, 0.22))
 				elif cell["crop_id"] == -1 and selected_seed >= 0:
-					draw_colored_polygon(vcorners, Color(0.3, 0.9, 0.3, 0.25))
+					_d_colored_polygon(vcorners, Color(0.3, 0.9, 0.3, 0.25))
 				elif cell["crop_id"] != -1 and cell["progress"] >= 1.0:
-					draw_colored_polygon(vcorners, Color(1.0, 0.85, 0.15, 0.35))
+					_d_colored_polygon(vcorners, Color(1.0, 0.85, 0.15, 0.35))
 				else:
-					draw_colored_polygon(vcorners, Color(1, 1, 1, 0.1))
+					_d_colored_polygon(vcorners, Color(1, 1, 1, 0.1))
 
 			# Border
 			if col == hover_col and row == hover_row:
 				var bcol := Color(1, 0.9, 0.2, 0.9)
 				for i in range(4):
-					draw_line(vcorners[i], vcorners[(i + 1) % 4], bcol, 2.0)
+					_d_line(vcorners[i], vcorners[(i + 1) % 4], bcol, 2.0)
 
 			# Seed preview on empty tile
 			if _is_cell_unlocked(cell) and cell["crop_id"] == -1 and col == hover_col and row == hover_row and selected_seed >= 0:
@@ -1501,11 +1796,13 @@ func _draw():
 				if seed_texture != null:
 					_draw_seed_preview_texture(cx, cy, seed_texture)
 				else:
-					draw_circle(Vector2(cx, cy), 10, Color(CROP_COLORS[selected_seed][1].r, CROP_COLORS[selected_seed][1].g, CROP_COLORS[selected_seed][1].b, 0.7))
-					draw_circle(Vector2(cx, cy), 6, CROP_COLORS[selected_seed][1])
+					_d_circle(Vector2(cx, cy), 10, Color(CROP_COLORS[selected_seed][1].r, CROP_COLORS[selected_seed][1].g, CROP_COLORS[selected_seed][1].b, 0.7))
+					_d_circle(Vector2(cx, cy), 6, CROP_COLORS[selected_seed][1])
 
 	# ---- ISOMETRIC TILES: PASS 2 - Crops + progress bars (back to front) ----
 	for row in range(ROWS):
+		if farm[row].size() < COLS:
+			return
 		for col in range(COLS):
 			var sp := _get_plot_position(col, row)
 			var cx: float = sp.x
@@ -1525,12 +1822,12 @@ func _draw():
 					var lock_text := "Lv" + str(req_level)
 					var f_lock: Font = ThemeDB.fallback_font
 					var lock_w: float = f_lock.get_string_size(lock_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x
-					draw_rect(Rect2(cx - lock_w * 0.5 - 6, cy - 10, lock_w + 12, 18), Color(0.02, 0.02, 0.02, 0.68))
+					_d_rect(Rect2(cx - lock_w * 0.5 - 6, cy - 10, lock_w + 12, 18), Color(0.02, 0.02, 0.02, 0.68))
 					_draw_text(cx - lock_w * 0.5, cy - 8, lock_text, 12, Color(0.92, 0.9, 0.78, 0.95))
 					if col == hover_col and row == hover_row:
 						var cost_text := str(req_cost) + " 金币开垦"
 						var cost_w: float = f_lock.get_string_size(cost_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
-						draw_rect(Rect2(cx - cost_w * 0.5 - 6, cy + 12, cost_w + 12, 17), Color(0.02, 0.02, 0.02, 0.72))
+						_d_rect(Rect2(cx - cost_w * 0.5 - 6, cy + 12, cost_w + 12, 17), Color(0.02, 0.02, 0.02, 0.72))
 						_draw_text(cx - cost_w * 0.5, cy + 13, cost_text, 11, Color(1.0, 0.82, 0.26, 0.95))
 				continue
 
@@ -1558,7 +1855,7 @@ func _draw():
 					var f: Font = ThemeDB.fallback_font
 					var lbl := "收获"
 					var lw: float = f.get_string_size(lbl, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
-					draw_rect(Rect2(cx - lw * 0.5 - 4, cy - TH * 0.5 - 22, lw + 8, 16), Color(0.8, 0.6, 0, 0.85))
+					_d_rect(Rect2(cx - lw * 0.5 - 4, cy - TH * 0.5 - 22, lw + 8, 16), Color(0.8, 0.6, 0, 0.85))
 					_draw_text(cx - lw * 0.5, cy - TH * 0.5 - 19, lbl, 11, Color(1, 1, 1))
 
 				# Progress bar
@@ -1566,9 +1863,9 @@ func _draw():
 					var bw: float = TW * 0.5
 					var bx: float = cx - bw * 0.5
 					var by: float = cy + TH * 0.35
-					draw_rect(Rect2(bx, by, bw, 5), Color(0, 0, 0, 0.5))
+					_d_rect(Rect2(bx, by, bw, 5), Color(0, 0, 0, 0.5))
 					var bc := Color(0.2, 0.8, 0.3) if prog < 0.6 else Color(0.95, 0.75, 0.1)
-					draw_rect(Rect2(bx, by, bw * prog, 5), bc)
+					_d_rect(Rect2(bx, by, bw * prog, 5), bc)
 					# Stage name + time remaining (always visible)
 					var stage_name: String
 					var remaining: int = int((1.0 - prog) * float(CROPS[cid][3]))
@@ -1595,15 +1892,15 @@ func _draw():
 					var bc: int = int(cell.get("bug_count", 0))
 					var wc: int = int(cell.get("weed_count", 0))
 					if ws == 1:  # DRY
-						draw_circle(Vector2(icon_x, icon_y), 6, Color(0.2, 0.5, 0.9, 0.8))
+						_d_circle(Vector2(icon_x, icon_y), 6, Color(0.2, 0.5, 0.9, 0.8))
 						_draw_text(icon_x - 3, icon_y + 3, "渴", 8, Color(1, 1, 1))
 						icon_x -= 16
 					if bc > 0:
-						draw_circle(Vector2(icon_x, icon_y), 6, Color(0.9, 0.2, 0.2, 0.8))
+						_d_circle(Vector2(icon_x, icon_y), 6, Color(0.9, 0.2, 0.2, 0.8))
 						_draw_text(icon_x - 3, icon_y + 3, str(bc), 8, Color(1, 1, 1))
 						icon_x -= 16
 					if wc > 0:
-						draw_circle(Vector2(icon_x, icon_y), 6, Color(0.2, 0.7, 0.2, 0.8))
+						_d_circle(Vector2(icon_x, icon_y), 6, Color(0.2, 0.7, 0.2, 0.8))
 						_draw_text(icon_x - 3, icon_y + 3, str(wc), 8, Color(1, 1, 1))
 
 	# ---- HOVER TOOLTIP (QQ Farm style detail card) ----
@@ -1615,14 +1912,14 @@ func _draw():
 			var ly: float = hsp_locked.y
 			var ltw: float = 190.0
 			var lth: float = 82.0
-			var ltx: float = clampf(lx - ltw * 0.5, 5, VIEW_W - ltw - 5)
-			var lty: float = clampf(ly - TH * 0.5 - lth - 18, 5, VIEW_H - lth - 5)
+			var ltx: float = clampf(lx - ltw * 0.5, w_min.x + 5, w_max.x - ltw - 5)
+			var lty: float = clampf(ly - TH * 0.5 - lth - 18, w_min.y + 5, w_max.y - lth - 5)
 			var required_level := _get_reclaim_level(hover_col, hover_row)
 			var required_cost := _get_reclaim_cost(hover_col, hover_row)
 			var next_locked := _get_next_locked_plot()
-			draw_rect(Rect2(ltx, lty, ltw, lth), Color(0.08, 0.06, 0.03, 0.94))
-			draw_rect(Rect2(ltx, lty, ltw, lth), Color(0.55, 0.42, 0.2), false, 2)
-			draw_rect(Rect2(ltx, lty, ltw, 22), Color(0.34, 0.25, 0.12))
+			_d_rect(Rect2(ltx, lty, ltw, lth), Color(0.08, 0.06, 0.03, 0.94))
+			_d_rect(Rect2(ltx, lty, ltw, lth), Color(0.55, 0.42, 0.2), false, 2)
+			_d_rect(Rect2(ltx, lty, ltw, 22), Color(0.34, 0.25, 0.12))
 			_draw_text(ltx + 8, lty + 3, "未开垦土地", 13, Color(1.0, 0.92, 0.72))
 			_draw_text(ltx + 10, lty + 31, "需要等级: " + str(required_level), 12, Color(0.86, 0.92, 1.0))
 			_draw_text(ltx + 10, lty + 49, "开垦费用: " + str(required_cost) + " 金币", 12, Color(1.0, 0.84, 0.25))
@@ -1663,20 +1960,20 @@ func _draw():
 			var th: float = 95.0
 			var tx: float = hx - tw * 0.5
 			var ty: float = hy - TH * 0.5 - th - 18
-			# Clamp to screen
-			tx = clampf(tx, 5, VIEW_W - tw - 5)
-			ty = clampf(ty, 5, VIEW_H - th - 5)
+			# Clamp to visible world area
+			tx = clampf(tx, w_min.x + 5, w_max.x - tw - 5)
+			ty = clampf(ty, w_min.y + 5, w_max.y - th - 5)
 
 			# Card background
-			draw_rect(Rect2(tx, ty, tw, th), Color(0.08, 0.05, 0.02, 0.92))
-			draw_rect(Rect2(tx, ty, tw, th), Color(0.55, 0.42, 0.2), false, 2)
+			_d_rect(Rect2(tx, ty, tw, th), Color(0.08, 0.05, 0.02, 0.92))
+			_d_rect(Rect2(tx, ty, tw, th), Color(0.55, 0.42, 0.2), false, 2)
 
 			# Title bar
-			draw_rect(Rect2(tx, ty, tw, 22), Color(0.4, 0.28, 0.1))
+			_d_rect(Rect2(tx, ty, tw, 22), Color(0.4, 0.28, 0.1))
 			_draw_text(tx + 6, ty + 3, str(CROPS[hid][0]), 13, Color(1, 0.95, 0.8))
 
 			# Crop color dot
-			draw_circle(Vector2(tx + 14, ty + 36), 6, CROP_COLORS[hid][1])
+			_d_circle(Vector2(tx + 14, ty + 36), 6, CROP_COLORS[hid][1])
 
 			# Stage
 			_draw_text(tx + 26, ty + 30, stage, 11, stage_color)
@@ -1726,10 +2023,15 @@ func _draw():
 				Vector2(arrow_x, ty + th + 8),
 				Vector2(arrow_x + 6, ty + th),
 			])
-			draw_colored_polygon(arrow_pts, Color(0.08, 0.05, 0.02, 0.92))
+			_d_colored_polygon(arrow_pts, Color(0.08, 0.05, 0.02, 0.92))
 		else:
 			_draw_land_tooltip(hover_col, hover_row)
 
+# ---- 以下 UI 固定在屏幕上，不受 Camera 影响 ----
+# 被 UIOverlay._draw() 调用，caller 是 UIOverlay 节点（CanvasLayer 子节点）
+func _draw_ui(caller: CanvasItem):
+	_ui_draw_target = caller
+	var vp: Vector2 = get_viewport().get_visible_rect().size
 	# ---- TOOL BAR (地块下方图标按钮) ----
 	var tb_names := ["普通", "浇水", "施肥", "收获", "铲除", "全铲", "除虫", "除草", "全收", "仓库"]
 	var tb_colors := [
@@ -1747,8 +2049,8 @@ func _draw():
 	var btn_size: float = 58.0
 	var btn_gap: float = 8.0
 	var tb_total: float = 10.0 * btn_size + 9.0 * btn_gap
-	var tb_start_x: float = VIEW_W * 0.5 - tb_total * 0.5
-	var tb_y: float = OY + (COLS + ROWS) * TH * 0.5 + 30
+	var tb_start_x: float = vp.x * 0.5 - tb_total * 0.5
+	var tb_y: float = vp.y - 78.0
 
 	for ti in range(10):
 		var bx: float = tb_start_x + ti * (btn_size + btn_gap)
@@ -1764,14 +2066,14 @@ func _draw():
 			var icon_grow := 4.0 if is_active else 0.0
 			var icon_rect := Rect2(bx - icon_grow * 0.5, by - icon_grow * 0.5, btn_size + icon_grow, btn_size + icon_grow)
 			if is_active:
-				draw_circle(Vector2(icon_cx, by + btn_size * 0.48), 38.0, Color(1.0, 0.86, 0.22, 0.18))
-				draw_circle(Vector2(icon_cx, by + btn_size * 0.48), 30.0, Color(1.0, 0.96, 0.42, 0.10))
-			draw_texture_rect(icon_texture, icon_rect, false)
+				_d_circle(Vector2(icon_cx, by + btn_size * 0.48), 38.0, Color(1.0, 0.86, 0.22, 0.18))
+				_d_circle(Vector2(icon_cx, by + btn_size * 0.48), 30.0, Color(1.0, 0.96, 0.42, 0.10))
+			_d_texture_rect(icon_texture, icon_rect, false)
 			var txt_col: Color = Color(1.0, 0.92, 0.34, 0.98) if is_active else Color(0.78, 0.78, 0.78)
 			var label_w: float = ThemeDB.fallback_font.get_string_size(tb_names[ti], HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x
 			_draw_text(icon_cx - label_w * 0.5, by + btn_size + 1.0, tb_names[ti], 12, txt_col)
 			if is_active:
-				draw_line(Vector2(icon_cx - 15.0, by + btn_size + 17.0), Vector2(icon_cx + 15.0, by + btn_size + 17.0), Color(1.0, 0.86, 0.22, 0.95), 3.0)
+				_d_line(Vector2(icon_cx - 15.0, by + btn_size + 17.0), Vector2(icon_cx + 15.0, by + btn_size + 17.0), Color(1.0, 0.86, 0.22, 0.95), 3.0)
 			continue
 
 		if ti == 0:
@@ -1785,19 +2087,19 @@ func _draw():
 				Vector2(icon_cx + 2, icon_cy + 2),
 				Vector2(icon_cx + 8, icon_cy - 2),
 			])
-			draw_colored_polygon(arrow, Color(1, 1, 1, 0.9))
+			_d_colored_polygon(arrow, Color(1, 1, 1, 0.9))
 
 		elif ti == 1:
 			# 浇水 - 水壶
-			draw_rect(Rect2(icon_cx - 8, icon_cy - 4, 16, 10), Color(0.6, 0.75, 0.9))
-			draw_rect(Rect2(icon_cx - 8, icon_cy - 4, 16, 10), Color(0.3, 0.5, 0.8), false, 1.5)
+			_d_rect(Rect2(icon_cx - 8, icon_cy - 4, 16, 10), Color(0.6, 0.75, 0.9))
+			_d_rect(Rect2(icon_cx - 8, icon_cy - 4, 16, 10), Color(0.3, 0.5, 0.8), false, 1.5)
 			# 壶嘴
-			draw_line(Vector2(icon_cx + 8, icon_cy - 4), Vector2(icon_cx + 14, icon_cy - 10), Color(0.3, 0.5, 0.8), 2.0)
+			_d_line(Vector2(icon_cx + 8, icon_cy - 4), Vector2(icon_cx + 14, icon_cy - 10), Color(0.3, 0.5, 0.8), 2.0)
 			# 水滴
-			draw_circle(Vector2(icon_cx + 10, icon_cy - 14), 2.5, Color(0.3, 0.6, 1.0))
-			draw_circle(Vector2(icon_cx + 5, icon_cy - 16), 2.0, Color(0.3, 0.6, 1.0))
+			_d_circle(Vector2(icon_cx + 10, icon_cy - 14), 2.5, Color(0.3, 0.6, 1.0))
+			_d_circle(Vector2(icon_cx + 5, icon_cy - 16), 2.0, Color(0.3, 0.6, 1.0))
 			# 把手
-			draw_arc(Vector2(icon_cx - 2, icon_cy - 8), 6, 0, PI, 12, Color(0.3, 0.5, 0.8), 2.0)
+			_d_arc(Vector2(icon_cx - 2, icon_cy - 8), 6, 0, PI, 12, Color(0.3, 0.5, 0.8), 2.0)
 
 		elif ti == 2:
 			# 施肥 - 袋子
@@ -1807,13 +2109,13 @@ func _draw():
 				Vector2(icon_cx + 9, icon_cy + 12),
 				Vector2(icon_cx - 9, icon_cy + 12),
 			])
-			draw_colored_polygon(bag_body, Color(0.68, 0.52, 0.23))
+			_d_colored_polygon(bag_body, Color(0.68, 0.52, 0.23))
 			for bi in range(4):
-				draw_line(bag_body[bi], bag_body[(bi + 1) % 4], Color(0.42, 0.28, 0.08), 1.5)
-			draw_line(Vector2(icon_cx - 6, icon_cy - 8), Vector2(icon_cx + 6, icon_cy - 8), Color(0.32, 0.22, 0.08), 2.0)
+				_d_line(bag_body[bi], bag_body[(bi + 1) % 4], Color(0.42, 0.28, 0.08), 1.5)
+			_d_line(Vector2(icon_cx - 6, icon_cy - 8), Vector2(icon_cx + 6, icon_cy - 8), Color(0.32, 0.22, 0.08), 2.0)
 			_draw_text(icon_cx - 6, icon_cy - 2, "肥", 11, Color(1, 0.92, 0.55))
-			draw_circle(Vector2(icon_cx - 15, icon_cy + 12), 2.0, Color(0.9, 0.75, 0.25))
-			draw_circle(Vector2(icon_cx + 14, icon_cy + 10), 1.8, Color(0.9, 0.75, 0.25))
+			_d_circle(Vector2(icon_cx - 15, icon_cy + 12), 2.0, Color(0.9, 0.75, 0.25))
+			_d_circle(Vector2(icon_cx + 14, icon_cy + 10), 1.8, Color(0.9, 0.75, 0.25))
 
 		elif ti == 3:
 			# 收获 - 篮子
@@ -1824,42 +2126,42 @@ func _draw():
 				Vector2(icon_cx + 8, icon_cy + 8),
 				Vector2(icon_cx - 8, icon_cy + 8),
 			])
-			draw_colored_polygon(basket, Color(0.7, 0.55, 0.25))
+			_d_colored_polygon(basket, Color(0.7, 0.55, 0.25))
 			# 提手
-			draw_arc(Vector2(icon_cx, icon_cy - 10), 8, PI, TAU, 12, Color(0.45, 0.32, 0.1), 2.0)
+			_d_arc(Vector2(icon_cx, icon_cy - 10), 8, PI, TAU, 12, Color(0.45, 0.32, 0.1), 2.0)
 			# 里面的小果子
-			draw_circle(Vector2(icon_cx - 3, icon_cy), 2.5, Color(0.9, 0.2, 0.15))
-			draw_circle(Vector2(icon_cx + 3, icon_cy - 1), 2.5, Color(1.0, 0.6, 0.1))
-			draw_circle(Vector2(icon_cx, icon_cy - 5), 2.4, Color(0.95, 0.92, 0.2))
+			_d_circle(Vector2(icon_cx - 3, icon_cy), 2.5, Color(0.9, 0.2, 0.15))
+			_d_circle(Vector2(icon_cx + 3, icon_cy - 1), 2.5, Color(1.0, 0.6, 0.1))
+			_d_circle(Vector2(icon_cx, icon_cy - 5), 2.4, Color(0.95, 0.92, 0.2))
 
 		elif ti == 4:
 			# 铲除 - 铲子
-			draw_line(Vector2(icon_cx + 8, icon_cy - 16), Vector2(icon_cx - 8, icon_cy + 7), Color(0.92, 0.74, 0.42), 4.0)
-			draw_line(Vector2(icon_cx + 8, icon_cy - 16), Vector2(icon_cx - 8, icon_cy + 7), Color(0.42, 0.24, 0.12), 1.2)
+			_d_line(Vector2(icon_cx + 8, icon_cy - 16), Vector2(icon_cx - 8, icon_cy + 7), Color(0.92, 0.74, 0.42), 4.0)
+			_d_line(Vector2(icon_cx + 8, icon_cy - 16), Vector2(icon_cx - 8, icon_cy + 7), Color(0.42, 0.24, 0.12), 1.2)
 			var blade: PackedVector2Array = PackedVector2Array([
 				Vector2(icon_cx - 14, icon_cy + 7),
 				Vector2(icon_cx - 3, icon_cy + 2),
 				Vector2(icon_cx + 3, icon_cy + 12),
 				Vector2(icon_cx - 5, icon_cy + 19),
 			])
-			draw_colored_polygon(blade, Color(0.78, 0.84, 0.86))
+			_d_colored_polygon(blade, Color(0.78, 0.84, 0.86))
 			for si in range(4):
-				draw_line(blade[si], blade[(si + 1) % 4], Color(0.38, 0.42, 0.44), 1.4)
-			draw_line(Vector2(icon_cx + 5, icon_cy - 19), Vector2(icon_cx + 16, icon_cy - 13), Color(0.42, 0.24, 0.12), 3.0)
+				_d_line(blade[si], blade[(si + 1) % 4], Color(0.38, 0.42, 0.44), 1.4)
+			_d_line(Vector2(icon_cx + 5, icon_cy - 19), Vector2(icon_cx + 16, icon_cy - 13), Color(0.42, 0.24, 0.12), 3.0)
 
 		# Tool name below icon
 		var txt_col: Color = Color(1, 1, 1, 0.95) if is_active else Color(0.7, 0.7, 0.7)
 		_draw_text(bx + 14, by + btn_size - 6, tb_names[ti], 12, txt_col)
 
 	# ---- TOP HUD (left) ----
-	draw_rect(Rect2(8, 6, 280, 48), Color(0.08, 0.06, 0.02, 0.82))
-	draw_rect(Rect2(8, 6, 280, 48), Color(0.45, 0.35, 0.15), false, 2)
+	_d_rect(Rect2(8, 6, 280, 48), Color(0.08, 0.06, 0.02, 0.82))
+	_d_rect(Rect2(8, 6, 280, 48), Color(0.45, 0.35, 0.15), false, 2)
 	_draw_text(18, 10, "金币: " + str(gold), 18, Color(1, 0.88, 0.15))
 	_draw_text(150, 12, "Lv." + str(level), 16, Color(0.8, 0.9, 1.0))
 	# Exp bar
-	draw_rect(Rect2(18, 34, 180, 10), Color(0.1, 0.1, 0.15))
+	_d_rect(Rect2(18, 34, 180, 10), Color(0.1, 0.1, 0.15))
 	var ep: float = float(exp_val) / float(exp_to_level) if exp_to_level > 0 else 0.0
-	draw_rect(Rect2(18, 34, 180.0 * ep, 10), Color(0.25, 0.5, 1.0))
+	_d_rect(Rect2(18, 34, 180.0 * ep, 10), Color(0.25, 0.5, 1.0))
 	_draw_text(202, 32, str(exp_val) + "/" + str(exp_to_level), 10, Color(0.65, 0.75, 1))
 	# Land count
 	var unlocked_count := _get_unlocked_plot_count()
@@ -1874,7 +2176,7 @@ func _draw():
 	var tb_count: int = toolbar_btns.size()
 	var tb_btn_w := 72.0; var tb_btn_h := 46.0; var tb_gap := 10.0
 	var tb_total_w: float = tb_count * tb_btn_w + (tb_count - 1) * tb_gap
-	var toolbar_x: float = VIEW_W - tb_total_w - 14
+	var toolbar_x: float = vp.x - tb_total_w - 14
 	for i in range(tb_count):
 		var bx: float = toolbar_x + i * (tb_btn_w + tb_gap)
 		var by: float = 8.0
@@ -1882,15 +2184,15 @@ func _draw():
 		var col: Color = btn_info["color"]
 		var dk: Color = btn_info["dark"]
 		# Shadow
-		draw_rect(Rect2(bx + 2, by + 3, tb_btn_w, tb_btn_h), Color(0, 0, 0, 0.3))
+		_d_rect(Rect2(bx + 2, by + 3, tb_btn_w, tb_btn_h), Color(0, 0, 0, 0.3))
 		# Body
-		draw_rect(Rect2(bx, by, tb_btn_w, tb_btn_h - 4), col)
+		_d_rect(Rect2(bx, by, tb_btn_w, tb_btn_h - 4), col)
 		# Bottom edge (darker, 3D effect)
-		draw_rect(Rect2(bx, by + tb_btn_h - 6, tb_btn_w, 4), dk)
+		_d_rect(Rect2(bx, by + tb_btn_h - 6, tb_btn_w, 4), dk)
 		# Outline
-		draw_rect(Rect2(bx, by, tb_btn_w, tb_btn_h - 2), Color(0.1, 0.08, 0.04), false, 2)
+		_d_rect(Rect2(bx, by, tb_btn_w, tb_btn_h - 2), Color(0.1, 0.08, 0.04), false, 2)
 		# Highlight top
-		draw_rect(Rect2(bx + 3, by + 2, tb_btn_w - 6, 3), Color(1, 1, 1, 0.25))
+		_d_rect(Rect2(bx + 3, by + 2, tb_btn_w - 6, 3), Color(1, 1, 1, 0.25))
 		# Label centered
 		var lbl: String = btn_info["label"]
 		var lbl_w: float = ThemeDB.fallback_font.get_string_size(lbl, HORIZONTAL_ALIGNMENT_LEFT, -1, 18).x
@@ -1903,9 +2205,38 @@ func _draw():
 		var alpha := minf(toast_timer, 1.0)
 		var f: Font = ThemeDB.fallback_font
 		var tw: float = f.get_string_size(toast_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 20).x + 50
-		var tx: float = (VIEW_W - tw) * 0.5
-		draw_rect(Rect2(tx, 670, tw, 38), Color(0, 0, 0, 0.8 * alpha))
-		_draw_text(tx + 25, 677, toast_text, 18, Color(1, 1, 1, alpha))
+		var tx: float = (vp.x - tw) * 0.5
+		_d_rect(Rect2(tx, vp.y - 50, tw, 38), Color(0, 0, 0, 0.8 * alpha))
+		_draw_text(tx + 25, vp.y - 43, toast_text, 18, Color(1, 1, 1, alpha))
+
+	# ---- Debug info (右上角) ----
+	if cam:
+		var grid_size_debug := Vector2.ZERO
+		var anchors := get_node_or_null(PLOT_ANCHORS_PATH)
+		if anchors:
+			var gmin := Vector2(INF, INF)
+			var gmax := Vector2(-INF, -INF)
+			for child in anchors.get_children():
+				if child is Node2D:
+					gmin.x = minf(gmin.x, child.position.x)
+					gmin.y = minf(gmin.y, child.position.y)
+					gmax.x = maxf(gmax.x, child.position.x)
+					gmax.y = maxf(gmax.y, child.position.y)
+			grid_size_debug = gmax - gmin + Vector2(TW, TH)
+		var ws := get_viewport().get_visible_rect().size
+		var dbg_lines := [
+			"Viewport: %d x %d" % [int(ws.x), int(ws.y)],
+			"Grid: %d x %d" % [int(grid_size_debug.x), int(grid_size_debug.y)],
+			"Zoom: %.2f  Min: %.2f" % [cam.zoom.x, _cam_min_zoom],
+			"Cam: %.0f, %.0f" % [cam.position.x, cam.position.y],
+		]
+		var dbg_x: float = vp.x - 220
+		var dbg_y: float = 10.0
+		_d_rect(Rect2(dbg_x - 4, dbg_y - 2, 216, dbg_lines.size() * 18 + 8), Color(0, 0, 0, 0.7))
+		for i in range(dbg_lines.size()):
+			_draw_text(dbg_x, dbg_y + i * 18, dbg_lines[i], 13, Color(0.8, 1.0, 0.8))
+
+	_ui_draw_target = null
 
 func _draw_reclaim_confirm():
 	var rect := _get_reclaim_confirm_rect()
@@ -1916,10 +2247,11 @@ func _draw_reclaim_confirm():
 	var required_level := _get_reclaim_level(col, row)
 	var required_cost := _get_reclaim_cost(col, row)
 	var plot_no := _get_plot_index(col, row) + 1
-	draw_rect(Rect2(0, 0, VIEW_W, VIEW_H), Color(0, 0, 0, 0.62))
-	draw_rect(rect, Color(0.94, 0.9, 0.78))
-	draw_rect(rect, Color(0.48, 0.32, 0.12), false, 4)
-	draw_rect(Rect2(rect.position.x, rect.position.y, rect.size.x, 30), Color(0.42, 0.28, 0.08))
+	var vp: Vector2 = get_viewport().get_visible_rect().size
+	_d_rect(Rect2(0, 0, vp.x, vp.y), Color(0, 0, 0, 0.62))
+	_d_rect(rect, Color(0.94, 0.9, 0.78))
+	_d_rect(rect, Color(0.48, 0.32, 0.12), false, 4)
+	_d_rect(Rect2(rect.position.x, rect.position.y, rect.size.x, 30), Color(0.42, 0.28, 0.08))
 	_draw_text(rect.position.x + 116, rect.position.y + 5, "确认开垦土地", 18, Color(1, 0.95, 0.82))
 	_draw_text(rect.position.x + 30, rect.position.y + 50, "第 " + str(plot_no) + " 块地", 16, Color(0.18, 0.14, 0.1))
 	_draw_text(rect.position.x + 30, rect.position.y + 76, "需要等级: " + str(required_level), 14, Color(0.2, 0.24, 0.42))
@@ -1927,51 +2259,54 @@ func _draw_reclaim_confirm():
 	_draw_text(rect.position.x + 30, rect.position.y + 128, "确认花费金币开垦这块土地吗？", 14, Color(0.28, 0.22, 0.18))
 	var cancel_rect := Rect2(rect.position.x + 40, rect.position.y + 145, 130, 34)
 	var confirm_rect := Rect2(rect.position.x + rect.size.x - 170, rect.position.y + 145, 130, 34)
-	draw_rect(cancel_rect, Color(0.55, 0.42, 0.28))
-	draw_rect(confirm_rect, Color(0.22, 0.62, 0.28))
+	_d_rect(cancel_rect, Color(0.55, 0.42, 0.28))
+	_d_rect(confirm_rect, Color(0.22, 0.62, 0.28))
 	_draw_text(cancel_rect.position.x + 44, cancel_rect.position.y + 7, "取消", 16, Color(1, 1, 1))
 	_draw_text(confirm_rect.position.x + 44, confirm_rect.position.y + 7, "确认", 16, Color(1, 1, 1))
 
 func _draw_reset_confirm():
 	var rect := _get_reset_confirm_rect()
-	draw_rect(Rect2(0, 0, VIEW_W, VIEW_H), Color(0, 0, 0, 0.68))
-	draw_rect(rect, Color(0.9, 0.86, 0.94))
-	draw_rect(rect, Color(0.4, 0.18, 0.45), false, 4)
-	draw_rect(Rect2(rect.position.x, rect.position.y, rect.size.x, 30), Color(0.35, 0.15, 0.4))
+	var vp: Vector2 = get_viewport().get_visible_rect().size
+	_d_rect(Rect2(0, 0, vp.x, vp.y), Color(0, 0, 0, 0.68))
+	_d_rect(rect, Color(0.9, 0.86, 0.94))
+	_d_rect(rect, Color(0.4, 0.18, 0.45), false, 4)
+	_d_rect(Rect2(rect.position.x, rect.position.y, rect.size.x, 30), Color(0.35, 0.15, 0.4))
 	_draw_text(rect.position.x + 142, rect.position.y + 5, "确认重置农场", 18, Color(1, 0.92, 0.98))
 	_draw_text(rect.position.x + 28, rect.position.y + 52, "这会清空当前存档中的金币、等级、土地、作物和背包数据。", 14, Color(0.22, 0.12, 0.3))
 	_draw_text(rect.position.x + 28, rect.position.y + 80, "重置后会立即覆盖旧存档，重新进入游戏也不会恢复。", 14, Color(0.45, 0.2, 0.3))
 	_draw_text(rect.position.x + 28, rect.position.y + 112, "确认要新开档吗？", 15, Color(0.55, 0.18, 0.18))
 	var cancel_rect := Rect2(rect.position.x + 50, rect.position.y + 165, 150, 36)
 	var confirm_rect := Rect2(rect.position.x + rect.size.x - 200, rect.position.y + 165, 150, 36)
-	draw_rect(cancel_rect, Color(0.55, 0.42, 0.55))
-	draw_rect(confirm_rect, Color(0.75, 0.22, 0.18))
+	_d_rect(cancel_rect, Color(0.55, 0.42, 0.55))
+	_d_rect(confirm_rect, Color(0.75, 0.22, 0.18))
 	_draw_text(cancel_rect.position.x + 52, cancel_rect.position.y + 8, "取消", 16, Color(1, 1, 1))
 	_draw_text(confirm_rect.position.x + 34, confirm_rect.position.y + 8, "确认重置", 16, Color(1, 1, 1))
 
 
 func _draw_shovel_all_confirm():
-	var rect := Rect2(VIEW_W * 0.5 - 200, VIEW_H * 0.5 - 80, 400, 160)
-	draw_rect(Rect2(0, 0, VIEW_W, VIEW_H), Color(0, 0, 0, 0.62))
-	draw_rect(rect, Color(0.94, 0.9, 0.78))
-	draw_rect(rect, Color(0.48, 0.32, 0.12), false, 4)
-	draw_rect(Rect2(rect.position.x, rect.position.y, rect.size.x, 30), Color(0.55, 0.24, 0.14))
+	var vp: Vector2 = get_viewport().get_visible_rect().size
+	var rect := Rect2(vp.x * 0.5 - 200, vp.y * 0.5 - 80, 400, 160)
+	_d_rect(Rect2(0, 0, vp.x, vp.y), Color(0, 0, 0, 0.62))
+	_d_rect(rect, Color(0.94, 0.9, 0.78))
+	_d_rect(rect, Color(0.48, 0.32, 0.12), false, 4)
+	_d_rect(Rect2(rect.position.x, rect.position.y, rect.size.x, 30), Color(0.55, 0.24, 0.14))
 	_draw_text(rect.position.x + 120, rect.position.y + 5, "确认铲除全部作物?", 18, Color(1, 0.95, 0.82))
 	_draw_text(rect.position.x + 30, rect.position.y + 50, "这将铲除所有地块上的作物，且不可恢复。", 14, Color(0.28, 0.22, 0.18))
 	var cancel_rect := Rect2(rect.position.x + 40, rect.position.y + 110, 130, 30)
 	var confirm_rect := Rect2(rect.position.x + rect.size.x - 170, rect.position.y + 110, 130, 30)
-	draw_rect(cancel_rect, Color(0.55, 0.42, 0.28))
-	draw_rect(confirm_rect, Color(0.75, 0.22, 0.18))
+	_d_rect(cancel_rect, Color(0.55, 0.42, 0.28))
+	_d_rect(confirm_rect, Color(0.75, 0.22, 0.18))
 	_draw_text(cancel_rect.position.x + 44, cancel_rect.position.y + 4, "取消", 16, Color(1, 1, 1))
 	_draw_text(confirm_rect.position.x + 44, confirm_rect.position.y + 4, "确认铲除", 16, Color(1, 1, 1))
 
 func _draw_warehouse_overlay():
+	var vp: Vector2 = get_viewport().get_visible_rect().size
 	var ww := 360.0; var wh := 300.0
-	var wx := (VIEW_W - ww) / 2; var wy := (VIEW_H - wh) / 2
-	draw_rect(Rect2(0, 0, VIEW_W, VIEW_H), Color(0, 0, 0, 0.55))
-	draw_rect(Rect2(wx, wy, ww, wh), Color(0.16, 0.14, 0.11))
-	draw_rect(Rect2(wx, wy, ww, wh), Color(0.45, 0.38, 0.22), false, 3)
-	draw_rect(Rect2(wx, wy, ww, 36), Color(0.3, 0.26, 0.16))
+	var wx := (vp.x - ww) / 2; var wy := (vp.y - wh) / 2
+	_d_rect(Rect2(0, 0, vp.x, vp.y), Color(0, 0, 0, 0.55))
+	_d_rect(Rect2(wx, wy, ww, wh), Color(0.16, 0.14, 0.11))
+	_d_rect(Rect2(wx, wy, ww, wh), Color(0.45, 0.38, 0.22), false, 3)
+	_d_rect(Rect2(wx, wy, ww, 36), Color(0.3, 0.26, 0.16))
 	_draw_text(wx + 140, wy + 8, "仓库", 20, Color(1, 0.92, 0.75))
 	_draw_text(wx + ww - 80, wy + 10, "点外部关闭", 12, Color(0.6, 0.55, 0.4))
 	var keys = inventory.keys()
@@ -1985,23 +2320,24 @@ func _draw_warehouse_overlay():
 	if item_count == 0:
 		_draw_text(wx + 120, wy + 120, "仓库是空的", 18, Color(0.5, 0.45, 0.35))
 func _draw_settings_overlay():
+	var vp: Vector2 = get_viewport().get_visible_rect().size
 	var sw := 360.0; var sh := 280.0
-	var sx := (VIEW_W - sw) / 2; var sy := (VIEW_H - sh) / 2
-	draw_rect(Rect2(0, 0, VIEW_W, VIEW_H), Color(0, 0, 0, 0.55))
-	draw_rect(Rect2(sx, sy, sw, sh), Color(0.16, 0.14, 0.11))
-	draw_rect(Rect2(sx, sy, sw, sh), Color(0.45, 0.38, 0.22), false, 3)
+	var sx := (vp.x - sw) / 2; var sy := (vp.y - sh) / 2
+	_d_rect(Rect2(0, 0, vp.x, vp.y), Color(0, 0, 0, 0.55))
+	_d_rect(Rect2(sx, sy, sw, sh), Color(0.16, 0.14, 0.11))
+	_d_rect(Rect2(sx, sy, sw, sh), Color(0.45, 0.38, 0.22), false, 3)
 	# Title bar
-	draw_rect(Rect2(sx, sy, sw, 36), Color(0.3, 0.26, 0.16))
+	_d_rect(Rect2(sx, sy, sw, 36), Color(0.3, 0.26, 0.16))
 	_draw_text(sx + 140, sy + 8, "设置", 20, Color(1, 0.92, 0.75))
 	# Close hint
 	_draw_text(sx + sw - 80, sy + 10, "点外部关闭", 12, Color(0.6, 0.55, 0.4))
 	# 退出登录 button
 	var btn_w := 260.0; var btn_h := 38.0
 	var bx := sx + (sw - btn_w) / 2
-	draw_rect(Rect2(bx, sy + 80, btn_w, btn_h), Color(0.3, 0.45, 0.65))
+	_d_rect(Rect2(bx, sy + 80, btn_w, btn_h), Color(0.3, 0.45, 0.65))
 	_draw_text(bx + 80, sy + 88, "退出登录", 18, Color(1, 1, 1))
 	# 重置农场 button
-	draw_rect(Rect2(bx, sy + 140, btn_w, btn_h), Color(0.72, 0.24, 0.2))
+	_d_rect(Rect2(bx, sy + 140, btn_w, btn_h), Color(0.72, 0.24, 0.2))
 	_draw_text(bx + 68, sy + 148, "重置农场/新开档", 18, Color(1, 1, 1))
 	# Warning text
 	_draw_text(bx + 8, sy + 200, "重置会清空所有游戏数据，不可恢复", 12, Color(0.65, 0.4, 0.35))
@@ -2021,7 +2357,7 @@ func _draw_sign(cx: float, cy: float, sign_color: Color, label: String, can_open
 	var scale: float = minf(board_w / sign_size.x, board_h / sign_size.y)
 	var draw_size := sign_size * scale
 	var draw_pos := Vector2(board_cx - draw_size.x * 0.5, board_top + (board_h - draw_size.y) * 0.5)
-	draw_texture_rect(_sign_texture, Rect2(draw_pos, draw_size), false)
+	_d_texture_rect(_sign_texture, Rect2(draw_pos, draw_size), false)
 	# 文字在牌子内部
 	var f: Font = ThemeDB.fallback_font
 	var text_color: Color = Color(0.12, 0.32, 0.12) if can_open else Color(0.78, 0.12, 0.1)
@@ -2034,32 +2370,32 @@ func _draw_plant_full(cx: float, cy: float, leaf: Color, fruit: Color):
 	var by: float = cy
 	var sh: float = 28.0
 	# Stem
-	draw_line(Vector2(cx, by), Vector2(cx, by - sh), Color(0.2, 0.5, 0.12), 3.0)
+	_d_line(Vector2(cx, by), Vector2(cx, by - sh), Color(0.2, 0.5, 0.12), 3.0)
 	# Leaves
-	draw_circle(Vector2(cx - 10, by - sh * 0.6), 8, leaf)
-	draw_circle(Vector2(cx + 10, by - sh * 0.55), 7, leaf)
+	_d_circle(Vector2(cx - 10, by - sh * 0.6), 8, leaf)
+	_d_circle(Vector2(cx + 10, by - sh * 0.55), 7, leaf)
 	# Fruit
-	draw_circle(Vector2(cx, by - sh - 4), 10, fruit)
-	draw_circle(Vector2(cx - 3, by - sh - 7), 3, Color(1, 1, 1, 0.35))
+	_d_circle(Vector2(cx, by - sh - 4), 10, fruit)
+	_d_circle(Vector2(cx - 3, by - sh - 7), 3, Color(1, 1, 1, 0.35))
 
 func _draw_plant_growing(cx: float, cy: float, leaf: Color, prog: float):
 	var by: float = cy
 	var sh: float = 10.0 + prog * 18.0
-	draw_line(Vector2(cx, by), Vector2(cx, by - sh), Color(0.2, 0.5, 0.12), 2.5)
-	draw_circle(Vector2(cx, by - sh), 5 + int(prog * 4), leaf)
-	draw_circle(Vector2(cx - 6, by - sh * 0.5), 4, leaf)
-	draw_circle(Vector2(cx + 6, by - sh * 0.45), 3.5, leaf)
+	_d_line(Vector2(cx, by), Vector2(cx, by - sh), Color(0.2, 0.5, 0.12), 2.5)
+	_d_circle(Vector2(cx, by - sh), 5 + int(prog * 4), leaf)
+	_d_circle(Vector2(cx - 6, by - sh * 0.5), 4, leaf)
+	_d_circle(Vector2(cx + 6, by - sh * 0.45), 3.5, leaf)
 
 func _draw_plant_seed(cx: float, cy: float, prog: float):
 	var by: float = cy
 	# Small sprout
 	var h: float = 3.0 + prog * 10.0
-	draw_line(Vector2(cx, by), Vector2(cx, by - h), Color(0.25, 0.6, 0.15), 2.0)
+	_d_line(Vector2(cx, by), Vector2(cx, by - h), Color(0.25, 0.6, 0.15), 2.0)
 	if prog > 0.05:
-		draw_circle(Vector2(cx - 2, by - h), 3, Color(0.3, 0.75, 0.2))
-		draw_circle(Vector2(cx + 2, by - h + 1), 2.5, Color(0.3, 0.75, 0.2))
+		_d_circle(Vector2(cx - 2, by - h), 3, Color(0.3, 0.75, 0.2))
+		_d_circle(Vector2(cx + 2, by - h + 1), 2.5, Color(0.3, 0.75, 0.2))
 	# Seed
-	draw_circle(Vector2(cx, by + 2), 3.5, Color(0.6, 0.45, 0.25))
+	_d_circle(Vector2(cx, by + 2), 3.5, Color(0.6, 0.45, 0.25))
 
 func _draw_land_tile(corners: PackedVector2Array, cell: Dictionary):
 	var texture := _get_land_texture(cell)
@@ -2071,7 +2407,7 @@ func _draw_land_tile(corners: PackedVector2Array, cell: Dictionary):
 		bg_color = Color(0.52, 0.36, 0.20)
 	# 半透明底色，让 SandyBase 从缝隙和边缘透出来
 	bg_color.a = 0.78
-	draw_colored_polygon(corners, bg_color)
+	_d_colored_polygon(corners, bg_color)
 	if texture != null:
 		var size := texture.get_size()
 		if size.x <= 0.0 or size.y <= 0.0:
@@ -2105,15 +2441,19 @@ func _get_texture_avg_color(texture: Texture2D) -> Color:
 func _draw_land_tooltip(col: int, row: int):
 	var cell: Dictionary = farm[row][col]
 	var sp := _get_plot_position(col, row)
+	var vp: Vector2 = get_viewport().get_visible_rect().size
+	var ctrans := get_viewport().get_canvas_transform()
+	var w_min := ctrans.affine_inverse() * Vector2.ZERO
+	var w_max := ctrans.affine_inverse() * vp
 	var tw := 176.0
 	var th := 78.0
-	var tx := clampf(sp.x - tw * 0.5, 5.0, VIEW_W - tw - 5.0)
-	var ty := clampf(sp.y - TH * 0.5 - th - 18.0, 5.0, VIEW_H - th - 5.0)
+	var tx := clampf(sp.x - tw * 0.5, w_min.x + 5.0, w_max.x - tw - 5.0)
+	var ty := clampf(sp.y - TH * 0.5 - th - 18.0, w_min.y + 5.0, w_max.y - th - 5.0)
 	var land_level := int(cell.get("land_level", 1))
 	var work := int(cell.get("land_work", 0))
-	draw_rect(Rect2(tx, ty, tw, th), Color(0.08, 0.05, 0.02, 0.92))
-	draw_rect(Rect2(tx, ty, tw, th), Color(0.55, 0.42, 0.2), false, 2)
-	draw_rect(Rect2(tx, ty, tw, 22), Color(0.38, 0.28, 0.12))
+	_d_rect(Rect2(tx, ty, tw, th), Color(0.08, 0.05, 0.02, 0.92))
+	_d_rect(Rect2(tx, ty, tw, th), Color(0.55, 0.42, 0.2), false, 2)
+	_d_rect(Rect2(tx, ty, tw, 22), Color(0.38, 0.28, 0.12))
 	_draw_text(tx + 8, ty + 3, _get_land_level_name(land_level), 13, Color(1.0, 0.92, 0.72))
 	if land_level >= LAND_LEVEL_MAX:
 		_draw_text(tx + 10, ty + 32, "已是最高等级", 12, Color(0.95, 0.82, 0.42))
@@ -2126,7 +2466,7 @@ func _draw_land_tooltip(col: int, row: int):
 		Vector2(arrow_x, ty + th + 8.0),
 		Vector2(arrow_x + 6.0, ty + th),
 	])
-	draw_colored_polygon(arrow_pts, Color(0.08, 0.05, 0.02, 0.92))
+	_d_colored_polygon(arrow_pts, Color(0.08, 0.05, 0.02, 0.92))
 
 func _get_land_texture_source_rect(cell: Dictionary, size: Vector2) -> Rect2:
 	var key := _get_land_texture_key(cell)
@@ -2211,7 +2551,7 @@ func _draw_crop_atlas_texture(cx: float, tile_center_y: float, texture: Texture2
 	var draw_size := size * scale_factor
 	var anchor := _get_crop_ground_anchor(texture)
 	var draw_pos := Vector2(cx, tile_center_y) - anchor * scale_factor
-	draw_texture_rect(texture, Rect2(draw_pos, draw_size), false)
+	_d_texture_rect(texture, Rect2(draw_pos, draw_size), false)
 
 func _get_crop_scale(cid: int, size: Vector2, stage: int) -> float:
 	var target_size := 110.0
@@ -2253,22 +2593,22 @@ func _get_crop_ground_anchor(texture: Texture2D) -> Vector2:
 
 func _draw_crop_preview(x: float, y: float, texture: Texture2D, label: String):
 	var bg_rect := Rect2(x, y, 120, 92)
-	draw_rect(bg_rect, Color(0.14, 0.10, 0.06, 0.75))
-	draw_rect(bg_rect, Color(0.40, 0.30, 0.16), false, 2)
+	_d_rect(bg_rect, Color(0.14, 0.10, 0.06, 0.75))
+	_d_rect(bg_rect, Color(0.40, 0.30, 0.16), false, 2)
 	if texture != null:
 		var size := texture.get_size()
 		if size.x > 0.0 and size.y > 0.0:
 			var scale_factor := minf(0.42, 62.0 / maxf(size.x, size.y))
 			var draw_size := size * scale_factor
 			var draw_pos := Vector2(x + 60 - draw_size.x * 0.5, y + 60 - draw_size.y)
-			draw_texture_rect(texture, Rect2(draw_pos, draw_size), false)
+			_d_texture_rect(texture, Rect2(draw_pos, draw_size), false)
 	else:
-		draw_circle(Vector2(x + 60, y + 42), 16, Color(0.35, 0.42, 0.26))
+		_d_circle(Vector2(x + 60, y + 42), 16, Color(0.35, 0.42, 0.26))
 	_draw_text(x + 34, y + 68, label, 12, Color(1, 0.95, 0.85))
 
 func _draw_ui_seed_thumbnail(rect: Rect2, texture: Texture2D):
-	draw_rect(rect, Color(1, 1, 1, 0.22))
-	draw_rect(rect, Color(0.42, 0.30, 0.16, 0.55), false, 1.0)
+	_d_rect(rect, Color(1, 1, 1, 0.22))
+	_d_rect(rect, Color(0.42, 0.30, 0.16, 0.55), false, 1.0)
 	if texture == null:
 		return
 	var size := texture.get_size()
@@ -2277,7 +2617,7 @@ func _draw_ui_seed_thumbnail(rect: Rect2, texture: Texture2D):
 	var scale_factor := minf(rect.size.x / size.x, rect.size.y / size.y)
 	var draw_size := size * scale_factor
 	var draw_pos := rect.position + (rect.size - draw_size) * 0.5
-	draw_texture_rect(texture, Rect2(draw_pos, draw_size), false)
+	_d_texture_rect(texture, Rect2(draw_pos, draw_size), false)
 
 func _draw_inventory_crop_icon(rect: Rect2, texture: Texture2D):
 	if texture == null:
@@ -2288,7 +2628,7 @@ func _draw_inventory_crop_icon(rect: Rect2, texture: Texture2D):
 	var scale_factor := minf(rect.size.x / size.x, rect.size.y / size.y)
 	var draw_size := size * scale_factor
 	var draw_pos := rect.position + Vector2((rect.size.x - draw_size.x) * 0.5, rect.size.y - draw_size.y)
-	draw_texture_rect(texture, Rect2(draw_pos, draw_size), false)
+	_d_texture_rect(texture, Rect2(draw_pos, draw_size), false)
 
 func _draw_seed_preview_texture(cx: float, cy: float, texture: Texture2D):
 	var size := texture.get_size()
@@ -2298,9 +2638,38 @@ func _draw_seed_preview_texture(cx: float, cy: float, texture: Texture2D):
 	var scale_factor := minf(target / size.x, target / size.y)
 	var draw_size := size * scale_factor
 	var draw_pos := Vector2(cx - draw_size.x * 0.5, cy - draw_size.y * 0.5)
-	draw_texture_rect(texture, Rect2(draw_pos, draw_size), false)
+	_d_texture_rect(texture, Rect2(draw_pos, draw_size), false)
 
 # ---- Text helper ----
 func _draw_text(x: float, y: float, text: String, size: int, color: Color):
 	var font: Font = ThemeDB.fallback_font
-	draw_string(font, Vector2(x, y + float(size) * 0.8), text, HORIZONTAL_ALIGNMENT_LEFT, -1, size, color)
+	var t: CanvasItem = _ui_draw_target if _ui_draw_target != null else self
+	t.draw_string(font, Vector2(x, y + float(size) * 0.8), text, HORIZONTAL_ALIGNMENT_LEFT, -1, size, color)
+
+# UI draw helpers — route to _ui_draw_target when set
+func _d_rect(rect: Rect2, color: Color, filled: bool = true, width: float = -1.0, antialiased: bool = false):
+	var t: CanvasItem = _ui_draw_target if _ui_draw_target != null else self
+	if filled:
+		t.draw_rect(rect, color)
+	else:
+		t.draw_rect(rect, color, false, width, antialiased)
+
+func _d_circle(position: Vector2, radius: float, color: Color):
+	var t: CanvasItem = _ui_draw_target if _ui_draw_target != null else self
+	t.draw_circle(position, radius, color)
+
+func _d_line(from: Vector2, to: Vector2, color: Color, width: float = -1.0, antialiased: bool = false):
+	var t: CanvasItem = _ui_draw_target if _ui_draw_target != null else self
+	t.draw_line(from, to, color, width, antialiased)
+
+func _d_colored_polygon(points: PackedVector2Array, color: Color):
+	var t: CanvasItem = _ui_draw_target if _ui_draw_target != null else self
+	t.draw_colored_polygon(points, color)
+
+func _d_texture_rect(texture: Texture2D, rect: Rect2, tile: bool = false, modulate: Color = Color(1, 1, 1, 1), transpose: bool = false):
+	var t: CanvasItem = _ui_draw_target if _ui_draw_target != null else self
+	t.draw_texture_rect(texture, rect, tile, modulate, transpose)
+
+func _d_arc(center: Vector2, radius: float, start_angle: float, end_angle: float, point_count: int, color: Color, width: float = -1.0, antialiased: bool = false):
+	var t: CanvasItem = _ui_draw_target if _ui_draw_target != null else self
+	t.draw_arc(center, radius, start_angle, end_angle, point_count, color, width, antialiased)

@@ -5,9 +5,10 @@
 [ext_resource type="Script" uid="uid://cvqrvr61gl6bb" path="res://scripts/plot_anchor_tile.gd" id="2_xqpul"]
 [ext_resource type="Texture2D" uid="uid://c757hbirnn8dc" path="res://assets/land/land_yellow_dry.png" id="3_x7wqs"]
 [ext_resource type="Script" uid="uid://b1g2altukveho" path="res://scripts/plot_anchor_preview.gd" id="3_xqpul"]
-[ext_resource type="Script" path="res://scenes/shop_overlay.gd" id="4_shop"]
-[ext_resource type="Script" path="res://scenes/inventory_overlay.gd" id="5_inv"]
-[ext_resource type="Script" path="res://scenes/settings_overlay.gd" id="6_set"]
+[ext_resource type="Script" uid="uid://bd86ujxkhygu6" path="res://scenes/shop_overlay.gd" id="4_shop"]
+[ext_resource type="Script" uid="uid://icb6jwsfnmay" path="res://scenes/inventory_overlay.gd" id="5_inv"]
+[ext_resource type="Script" uid="uid://beyp1oibeun62" path="res://scenes/settings_overlay.gd" id="6_set"]
+[ext_resource type="Script" uid="uid://c7oss3wsofpr2" path="res://scenes/ui_overlay.gd" id="7_ui"]
 
 [node name="Farm" type="Node2D" unique_id=1337986768]
 script = ExtResource("1_farm")
@@ -779,32 +780,44 @@ z_index = 100
 position = Vector2(150, 55)
 script = ExtResource("3_xqpul")
 
-[node name="ShopOverlay" type="Control" parent="."]
+[node name="ShopOverlay" type="Control" parent="." unique_id=830872335]
 visible = false
+layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-mouse_filter = 0
 script = ExtResource("4_shop")
 
-[node name="InventoryOverlay" type="Control" parent="."]
+[node name="InventoryOverlay" type="Control" parent="." unique_id=770139293]
 visible = false
+layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-mouse_filter = 0
 script = ExtResource("5_inv")
 
-[node name="SettingsOverlay" type="Control" parent="."]
+[node name="SettingsOverlay" type="Control" parent="." unique_id=1121103167]
 visible = false
+layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-mouse_filter = 0
 script = ExtResource("6_set")
+
+[node name="UILayer" type="CanvasLayer" parent="." unique_id=1239696688]
+
+[node name="UIOverlay" type="Control" parent="UILayer" unique_id=540688566]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+script = ExtResource("7_ui")

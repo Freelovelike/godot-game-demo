@@ -127,3 +127,6 @@
   error: "Error: EBUSY: resource busy or locked, watch 'C:\\Users\\null\\Documents\\新建游戏项目\\project.godot14906693775.tmp'"
 }
 [CodeGraph daemon] Shutting down (idle timeout; clients=0).
+[CodeGraph daemon] Listening on \\.\pipe\codegraph-a72d8b638ec21372 (pid 64228, v0.9.9). Idle timeout 300000ms.
+[CodeGraph MCP] File watcher active — graph will auto-sync on changes
+[CodeGraph daemon] Shutting down (idle timeout; clients=0).

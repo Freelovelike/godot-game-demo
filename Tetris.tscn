@@ -1,6 +1,0 @@
-[gd_scene format=3 uid="uid://dxh0qlnbck4yv"]
-
-[ext_resource type="Script" uid="uid://bxgifpsvegv2g" path="res://tetris.gd" id="1_t0l5r"]
-
-[node name="Node2D" type="Node2D" unique_id=1992272863]
-script = ExtResource("1_t0l5r")

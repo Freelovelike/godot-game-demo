@@ -2,14 +2,13 @@
 
 ## Project overview
 
-Godot 4.6 (Forward Plus renderer) game project in GDScript. Contains two mini-games: a 2.5D isometric farm sim ("QQ Farm") and a Tetris clone. The farm game is the primary focus.
+Godot 4.6 (Forward Plus renderer) game project in GDScript. A 2.5D isometric farm sim ("QQ Farm").
 
 ## Key architecture
 
 - **Entry scene**: `Login.tscn` → validates token against Go backend → transitions to `Farm.tscn`
-- **Farm game** (`farm.gd`, ~1400 lines): All gameplay + rendering in a single script. UI is 100% custom-drawn via `_draw()` — no Control nodes for game UI. Isometric grid: 6 cols × 5 rows, tile size 168×84.
-- **Tetris game** (`tetris.gd`): Standalone, no connection to farm. Also pure `_draw()` rendering.
-- **Login** (`login.gd`): Expects backend at `http://localhost:8080/api/v1` with `/auth/login`, `/auth/register`, `/profile` endpoints. Without the Go backend running, login will fail.
+- **Farm game** (`farm.gd`, ~2300 lines): All gameplay + rendering in a single script. UI is 100% custom-drawn via `_draw()` — no Control nodes for game UI. Isometric grid: 6 cols × 5 rows, tile size 168×84.
+- **Login** (`login.gd`): Uses `ApiConfig.API_BASE` autoload for backend URL. Expects backend with `/auth/login`, `/auth/register`, `/profile` endpoints.
 - **Crop atlas** (`scripts/crop_atlas.gd`): Static class managing per-crop stage textures (4 growth stages each). Texture cache via `load()`.
 - **Plot anchors**: `Farm.tscn` has a `PlotAnchors` node with 30 child nodes (`Plot_0_0` through `Plot_4_5`) defining isometric tile positions. Each uses `scripts/plot_anchor_tile.gd` (`@tool` script for editor preview).
 

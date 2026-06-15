@@ -15,15 +15,23 @@ run/main_scene="res://Login.tscn"
 config/features=PackedStringArray("4.6", "Forward Plus")
 config/icon="res://icon.svg"
 
+[autoload]
+
+ApiConfig="*res://api_config.gd"
+MCPRuntimeProbe="*res://addons/godot_mcp/runtime/mcp_runtime_probe.gd"
+
 [display]
 
-window/size/viewport_width=1000
-window/size/viewport_height=800
-window/size/window_width_override=1448
-window/size/window_height_override=1086
+window/size/viewport_width=1280
+window/size/viewport_height=720
 window/stretch/mode="canvas_items"
+window/stretch/aspect="keep_height"
 window/size/min_window_width=960
-window/size/min_window_height=720
+window/size/min_window_height=540
+
+[input_devices]
+
+pointing/emulate_mouse_from_touch=false
 
 [editor_plugins]
 

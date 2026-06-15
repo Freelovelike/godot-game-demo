@@ -2,7 +2,6 @@ extends Control
 
 ## Login / Register scene — talks to the Go backend and transitions to Farm on success.
 
-const API_BASE := "http://localhost:8080/api/v1"
 const AUTH_FILE := "user://auth.json"
 
 var http: HTTPRequest
@@ -41,7 +40,7 @@ func _try_auto_login() -> bool:
 	http = HTTPRequest.new()
 	http.request_completed.connect(_on_validate_completed.bind(token, user_info))
 	add_child(http)
-	var validate_url := API_BASE + "/profile"
+	var validate_url := ApiConfig.API_BASE + "/profile"
 	var hdrs := ["Authorization: Bearer " + token]
 	http.request(validate_url, hdrs, HTTPClient.METHOD_GET)
 	# Show a loading state while validating
@@ -200,7 +199,7 @@ func _on_action_pressed() -> void:
 	action_button.disabled = true
 
 	var endpoint := "/auth/register" if is_register_mode else "/auth/login"
-	var url := API_BASE + endpoint
+	var url := ApiConfig.API_BASE + endpoint
 	var body := JSON.stringify({"username": username, "password": password})
 	var headers := ["Content-Type: application/json"]
 
