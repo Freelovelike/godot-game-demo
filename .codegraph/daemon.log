@@ -1,0 +1,129 @@
+[CodeGraph daemon] Listening on \\.\pipe\codegraph-a72d8b638ec21372 (pid 57792, v0.9.9). Idle timeout 300000ms.
+[CodeGraph MCP] File watcher active — graph will auto-sync on changes
+[CodeGraph] File watcher error {
+  error: "Error: EBUSY: resource busy or locked, watch 'C:\\Users\\null\\Documents\\新建游戏项目\\Farm.tscn258023432747.tmp'"
+}
+[CodeGraph daemon] Listening on \\.\pipe\codegraph-a72d8b638ec21372 (pid 4036, v0.9.9). Idle timeout 300000ms.
+[CodeGraph MCP] File watcher active — graph will auto-sync on changes
+[CodeGraph daemon] Shutting down (idle timeout; clients=0).
+[CodeGraph daemon] Listening on \\.\pipe\codegraph-a72d8b638ec21372 (pid 26188, v0.9.9). Idle timeout 300000ms.
+[CodeGraph MCP] File watcher active — graph will auto-sync on changes
+[CodeGraph daemon] Shutting down (idle timeout; clients=0).
+[CodeGraph daemon] Listening on \\.\pipe\codegraph-a72d8b638ec21372 (pid 3504, v0.9.9). Idle timeout 300000ms.
+[CodeGraph MCP] File watcher active — graph will auto-sync on changes
+[CodeGraph] File watcher error {
+  error: "Error: EBUSY: resource busy or locked, watch 'C:\\Users\\null\\Documents\\新建游戏项目\\.gitattributes5466521348.tmp'"
+}
+[CodeGraph] File watcher error {
+  error: "Error: EBUSY: resource busy or locked, watch 'C:\\Users\\null\\Documents\\新建游戏项目\\.gitignore5466520613.tmp'"
+}
+[CodeGraph] File watcher error {
+  error: "Error: EBUSY: resource busy or locked, watch 'C:\\Users\\null\\Documents\\新建游戏项目\\assets\\land\\land_black_dry.png'"
+}
+[CodeGraph] File watcher error {
+  error: "Error: EBUSY: resource busy or locked, watch 'C:\\Users\\null\\Documents\\新建游戏项目\\assets\\land\\land_black_wet.png'"
+}
+[CodeGraph] File watcher error {
+  error: "Error: EBUSY: resource busy or locked, watch 'C:\\Users\\null\\Documents\\新建游戏项目\\assets\\land\\land_grass_locked.png'"
+}
+[CodeGraph] File watcher error {
+  error: "Error: EBUSY: resource busy or locked, watch 'C:\\Users\\null\\Documents\\新建游戏项目\\assets\\land\\land_red_dry.png'"
+}
+[CodeGraph] File watcher error {
+  error: "Error: EBUSY: resource busy or locked, watch 'C:\\Users\\null\\Documents\\新建游戏项目\\assets\\land\\land_red_wet.png'"
+}
+[CodeGraph] File watcher error {
+  error: "Error: EBUSY: resource busy or locked, watch 'C:\\Users\\null\\Documents\\新建游戏项目\\assets\\land\\land_yellow_dry.png'"
+}
+[CodeGraph] File watcher error {
+  error: "Error: EBUSY: resource busy or locked, watch 'C:\\Users\\null\\Documents\\新建游戏项目\\assets\\land\\land_yellow_wet.png'"
+}
+[CodeGraph] File watcher error {
+  error: "Error: EBUSY: resource busy or locked, watch 'C:\\Users\\null\\Documents\\新建游戏项目\\assets\\land\\land_black_wet.png.import6472305700.tmp'"
+}
+[CodeGraph] File watcher error {
+  error: "Error: EBUSY: resource busy or locked, watch 'C:\\Users\\null\\Documents\\新建游戏项目\\assets\\land\\land_grass_locked.png.import6472304938.tmp'"
+}
+[CodeGraph] File watcher error {
+  error: "Error: EBUSY: resource busy or locked, watch 'C:\\Users\\null\\Documents\\新建游戏项目\\assets\\land\\land_yellow_dry.png.import6472332506.tmp'"
+}
+[CodeGraph] File watcher error {
+  error: "Error: EBUSY: resource busy or locked, watch 'C:\\Users\\null\\Documents\\新建游戏项目\\assets\\land\\land_yellow_wet.png.import6472339236.tmp'"
+}
+[CodeGraph daemon] Shutting down (idle timeout; clients=0).
+[CodeGraph daemon] Listening on \\.\pipe\codegraph-a72d8b638ec21372 (pid 23748, v0.9.9). Idle timeout 300000ms.
+[CodeGraph MCP] File watcher active — graph will auto-sync on changes
+[CodeGraph] File watcher error {
+  error: "Error: EBUSY: resource busy or locked, watch 'C:\\Users\\null\\Documents\\新建游戏项目\\project.godot3878742.tmp'"
+}
+[CodeGraph] File watcher error {
+  error: "Error: EBUSY: resource busy or locked, watch 'C:\\Users\\null\\Documents\\新建游戏项目\\project.godot588570713.tmp'"
+}
+[CodeGraph daemon] Shutting down (idle timeout; clients=0).
+[CodeGraph daemon] Listening on \\.\pipe\codegraph-a72d8b638ec21372 (pid 13304, v0.9.9). Idle timeout 300000ms.
+[CodeGraph MCP] File watcher active — graph will auto-sync on changes
+[CodeGraph] File watcher error {
+  error: "Error: EBUSY: resource busy or locked, watch 'C:\\Users\\null\\Documents\\新建游戏项目\\project.godot3661328.tmp'"
+}
+[CodeGraph] File watcher error {
+  error: "Error: EBUSY: resource busy or locked, watch 'C:\\Users\\null\\Documents\\新建游戏项目\\assets\\land\\sandy_gravel_02_diff_1k.png'"
+}
+[CodeGraph] File watcher error {
+  error: "Error: EBUSY: resource busy or locked, watch 'C:\\Users\\null\\Documents\\新建游戏项目\\project.godot3258235.tmp'"
+}
+[CodeGraph] File watcher error {
+  error: "Error: EBUSY: resource busy or locked, watch 'C:\\Users\\null\\Documents\\新建游戏项目\\Farm.tscn519374579.tmp'"
+}
+[CodeGraph] File watcher error {
+  error: "Error: EBUSY: resource busy or locked, watch 'C:\\Users\\null\\Documents\\新建游戏项目\\Farm.tscn960268929.tmp'"
+}
+[CodeGraph daemon] Listening on \\.\pipe\codegraph-a72d8b638ec21372 (pid 16356, v0.9.9). Idle timeout 300000ms.
+[CodeGraph MCP] File watcher active — graph will auto-sync on changes
+[CodeGraph] File watcher error {
+  error: "Error: EBUSY: resource busy or locked, watch 'C:\\Users\\null\\Documents\\新建游戏项目\\project.godot3496514.tmp'"
+}
+[CodeGraph] File watcher error {
+  error: "Error: EBUSY: resource busy or locked, watch 'C:\\Users\\null\\Documents\\新建游戏项目\\Farm.tscn3861174579.tmp'"
+}
+[CodeGraph daemon] Shutting down (idle timeout; clients=0).
+[CodeGraph daemon] Listening on \\.\pipe\codegraph-a72d8b638ec21372 (pid 27752, v0.9.9). Idle timeout 300000ms.
+[CodeGraph MCP] File watcher active — graph will auto-sync on changes
+[CodeGraph] File watcher error {
+  error: "Error: EBUSY: resource busy or locked, watch 'C:\\Users\\null\\Documents\\新建游戏项目\\Farm.tscn14677787117.tmp'"
+}
+[CodeGraph] File watcher error {
+  error: "Error: EBUSY: resource busy or locked, watch 'C:\\Users\\null\\Documents\\新建游戏项目\\farm.gd14677823839.tmp'"
+}
+[CodeGraph] File watcher error {
+  error: "Error: EBUSY: resource busy or locked, watch 'C:\\Users\\null\\Documents\\新建游戏项目\\Farm.tscn14679952250.tmp'"
+}
+[CodeGraph] File watcher error {
+  error: "Error: EBUSY: resource busy or locked, watch 'C:\\Users\\null\\Documents\\新建游戏项目\\Farm.tscn14680667320.tmp'"
+}
+[CodeGraph] File watcher error {
+  error: "Error: EBUSY: resource busy or locked, watch 'C:\\Users\\null\\Documents\\新建游戏项目\\Farm.tscn14685740260.tmp'"
+}
+[CodeGraph] File watcher error {
+  error: "Error: EBUSY: resource busy or locked, watch 'C:\\Users\\null\\Documents\\新建游戏项目\\farm.gd14685763836.tmp'"
+}
+[CodeGraph] File watcher error {
+  error: "Error: EBUSY: resource busy or locked, watch 'C:\\Users\\null\\Documents\\新建游戏项目\\Farm.tscn14688507744.tmp'"
+}
+[CodeGraph] File watcher error {
+  error: "Error: EBUSY: resource busy or locked, watch 'C:\\Users\\null\\Documents\\新建游戏项目\\farm.gd14688532544.tmp'"
+}
+[CodeGraph] File watcher error {
+  error: "Error: EBUSY: resource busy or locked, watch 'C:\\Users\\null\\Documents\\新建游戏项目\\Farm.tscn14839341571.tmp'"
+}
+[CodeGraph] File watcher error {
+  error: "Error: EBUSY: resource busy or locked, watch 'C:\\Users\\null\\Documents\\新建游戏项目\\project.godot4144790.tmp'"
+}
+[CodeGraph daemon] Listening on \\.\pipe\codegraph-a72d8b638ec21372 (pid 29460, v0.9.9). Idle timeout 300000ms.
+[CodeGraph MCP] File watcher active — graph will auto-sync on changes
+[CodeGraph] File watcher error {
+  error: "Error: EBUSY: resource busy or locked, watch 'C:\\Users\\null\\Documents\\新建游戏项目\\project.godot14903343731.tmp'"
+}
+[CodeGraph] File watcher error {
+  error: "Error: EBUSY: resource busy or locked, watch 'C:\\Users\\null\\Documents\\新建游戏项目\\project.godot14906693775.tmp'"
+}
+[CodeGraph daemon] Shutting down (idle timeout; clients=0).
