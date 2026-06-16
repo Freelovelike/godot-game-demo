@@ -31,6 +31,12 @@ var land_texture_avg_colors: Dictionary = {}
 var _cursor_cache: Array[ImageTexture] = []
 var _sign_texture: Texture2D = null
 
+var ctx_menu_open: bool = false
+var ctx_col: int = -1
+var ctx_row: int = -1
+var ctx_menu_items: Array = []
+var ctx_batch_action: Dictionary = {}
+
 # ===================== Iso Farm 2.5D =====================
 const VIEW_W := 1448.0
 const VIEW_H := 1086.0
@@ -834,6 +840,7 @@ func _input(event: InputEvent):
 		mouse_held = false
 		last_action_col = -1
 		last_action_row = -1
+		ctx_batch_action.clear()
 		return
 
 	# --- Mouse motion ---
@@ -863,7 +870,8 @@ func _input(event: InputEvent):
 		# Drag action: if mouse held and moved to a NEW tile, do action
 		if mouse_held and hover_col >= 0 and not shop_open and not inventory_open and not reclaim_confirm_open and not reset_confirm_open and not settings_open and not warehouse_open and not shovel_all_confirm_open:
 			if hover_col != last_action_col or hover_row != last_action_row:
-				_do_tile_action(hover_col, hover_row)
+				if not ctx_batch_action.is_empty():
+					_execute_context_action(hover_col, hover_row, ctx_batch_action)
 				last_action_col = hover_col
 				last_action_row = hover_row
 		queue_redraw()
@@ -944,6 +952,25 @@ func _input(event: InputEvent):
 				return
 			return
 
+		# Check context menu
+		if ctx_menu_open:
+			var ctx_wp := _get_plot_position(ctx_col, ctx_row)
+			var vp_pos = (ctx_wp - cam.position) * cam.zoom + vp * 0.5
+			var menu_w = ctx_menu_items.size() * 50 + 10
+			var menu_rect = Rect2(vp_pos.x - menu_w * 0.5, vp_pos.y - 80, menu_w, 60)
+			if _point_in_rect(Vector2(mx, my), menu_rect):
+				var clicked_idx = int((mx - (menu_rect.position.x + 5)) / 50.0)
+				if clicked_idx >= 0 and clicked_idx < ctx_menu_items.size():
+					ctx_batch_action = ctx_menu_items[clicked_idx].duplicate()
+					mouse_held = true
+					last_action_col = ctx_col
+					last_action_row = ctx_row
+					_execute_context_action(ctx_col, ctx_row, ctx_batch_action)
+				return
+			else:
+				ctx_menu_open = false
+				queue_redraw()
+
 		# Check grid tiles (世界坐标) — 找最近的匹配地块
 		var best_col := -1
 		var best_row := -1
@@ -962,7 +989,7 @@ func _input(event: InputEvent):
 		if best_col >= 0:
 			_debug_last_tile_hit = Vector2i(best_col, best_row)
 			mouse_held = true
-			_do_tile_action(best_col, best_row)
+			_open_context_menu(best_col, best_row)
 			last_action_col = best_col
 			last_action_row = best_row
 			queue_redraw()
@@ -1040,6 +1067,73 @@ func _do_tile_action(col: int, row: int):
 		9:
 			warehouse_open = true
 			queue_redraw()
+
+func _open_context_menu(col: int, row: int):
+	if farm.is_empty() or row >= farm.size() or col >= farm[row].size():
+		return
+	var cell: Dictionary = farm[row][col]
+	if not _is_cell_unlocked(cell):
+		var next_locked := _get_next_locked_plot()
+		if next_locked.x != col or next_locked.y != row:
+			toast_text = "请按顺序先开垦下一块土地"
+			toast_timer = 1.8
+			return
+		_open_reclaim_confirm(col, row)
+		return
+		
+	ctx_col = col
+	ctx_row = row
+	ctx_menu_items.clear()
+	
+	if cell["crop_id"] == -1:
+		for i in range(CROPS.size()):
+			ctx_menu_items.append({
+				"type": "plant",
+				"crop_id": i,
+				"icon": _get_crop_seed_texture(i)
+			})
+	else:
+		var stage = _get_growth_stage(cell.get("progress", 0.0))
+		if stage >= 3:
+			ctx_menu_items.append({"type": "harvest", "icon": TOOL_ICON_TEXTURES[3]})
+		else:
+			if int(cell.get("weed_count", 0)) > 0:
+				ctx_menu_items.append({"type": "weed", "icon": TOOL_ICON_TEXTURES[7]})
+			if int(cell.get("bug_count", 0)) > 0:
+				ctx_menu_items.append({"type": "pest", "icon": TOOL_ICON_TEXTURES[6]})
+			if int(cell.get("water_state", 0)) == 0:
+				ctx_menu_items.append({"type": "water", "icon": TOOL_ICON_TEXTURES[1]})
+			ctx_menu_items.append({"type": "fertilize", "icon": TOOL_ICON_TEXTURES[2]})
+			
+		ctx_menu_items.append({"type": "shovel", "icon": TOOL_ICON_TEXTURES[4]})
+		
+	ctx_menu_open = true
+	queue_redraw()
+
+func _execute_context_action(col: int, row: int, item: Dictionary):
+	var pi = row * COLS + col
+	var t = item["type"]
+	if t == "plant":
+		_send_action("plant", {"plot_index": pi, "crop_id": item["crop_id"]})
+	elif t == "harvest":
+		_send_action("harvest", {"plot_index": pi})
+	elif t == "water":
+		_send_action("water", {"plot_index": pi})
+	elif t == "fertilize":
+		if selected_fertilizer >= 0:
+			_send_action("fertilize", {"plot_index": pi, "fert_id": selected_fertilizer})
+		else:
+			toast_text = "请先在商店购买并选择肥料"
+			toast_timer = 1.5
+	elif t == "weed":
+		_send_action("remove_weed", {"plot_index": pi})
+	elif t == "pest":
+		_send_action("remove_bug", {"plot_index": pi})
+	elif t == "shovel":
+		_send_action("shovel", {"plot_index": pi})
+		
+	ctx_menu_open = false
+	queue_redraw()
 
 func _open_top_toolbar_overlay(index: int):
 	mouse_held = false
@@ -1808,7 +1902,7 @@ func _draw_world():
 			_draw_land_tile(vcorners, cell)
 
 			# Hover glow (on soil layer)
-			if col == hover_col and row == hover_row:
+			if (col == hover_col and row == hover_row) or (ctx_menu_open and col == ctx_col and row == ctx_row):
 				if not _is_cell_unlocked(cell):
 					_d_colored_polygon(vcorners, Color(0.75, 0.75, 0.75, 0.22))
 				elif cell["crop_id"] == -1 and selected_seed >= 0:
@@ -1819,7 +1913,7 @@ func _draw_world():
 					_d_colored_polygon(vcorners, Color(1, 1, 1, 0.1))
 
 			# Border
-			if col == hover_col and row == hover_row:
+			if (col == hover_col and row == hover_row) or (ctx_menu_open and col == ctx_col and row == ctx_row):
 				var bcol := Color(1, 0.9, 0.2, 0.9)
 				for i in range(4):
 					_d_line(vcorners[i], vcorners[(i + 1) % 4], bcol, 2.0)
@@ -2234,9 +2328,44 @@ func _draw_ui(caller: CanvasItem):
 		_d_rect(Rect2(tx, vp.y - 50, tw, 38), Color(0, 0, 0, 0.8 * alpha))
 		_draw_text(tx + 25, vp.y - 43, toast_text, 18, Color(1, 1, 1, alpha))
 
+	_draw_context_menu_overlay(vp)
 	_draw_input_debug_overlay(vp)
 
 	_ui_draw_target = null
+
+func _draw_context_menu_overlay(vp: Vector2):
+	if not ctx_menu_open: return
+	
+	var wp := _get_plot_position(ctx_col, ctx_row)
+	var vp_pos = (wp - cam.position) * cam.zoom + vp * 0.5
+	var menu_w = ctx_menu_items.size() * 50 + 10
+	var menu_rect = Rect2(vp_pos.x - menu_w * 0.5, vp_pos.y - 80, menu_w, 60)
+	
+	# 画胶囊形状的半透明黑底
+	var r = 30.0
+	_d_circle(Vector2(menu_rect.position.x + r, menu_rect.position.y + r), r, Color(0, 0, 0, 0.65))
+	_d_circle(Vector2(menu_rect.position.x + menu_w - r, menu_rect.position.y + r), r, Color(0, 0, 0, 0.65))
+	_d_rect(Rect2(menu_rect.position.x + r, menu_rect.position.y, menu_w - 2 * r, 60), Color(0, 0, 0, 0.65))
+	
+	# 画小箭头指引到地块
+	var arrow_pts: PackedVector2Array = PackedVector2Array([
+		Vector2(vp_pos.x - 8, menu_rect.position.y + 60),
+		Vector2(vp_pos.x, menu_rect.position.y + 68),
+		Vector2(vp_pos.x + 8, menu_rect.position.y + 60),
+	])
+	_d_colored_polygon(arrow_pts, Color(0, 0, 0, 0.65))
+	
+	for i in range(ctx_menu_items.size()):
+		var item = ctx_menu_items[i]
+		var ix = menu_rect.position.x + 5 + i * 50
+		var iy = menu_rect.position.y + 5
+		
+		if item["icon"] != null:
+			var isz = item["icon"].get_size()
+			var iscale = minf(36.0 / maxf(isz.x, 1.0), 36.0 / maxf(isz.y, 1.0))
+			var idraw_sz = isz * iscale
+			var idraw_pos = Vector2(ix + 25 - idraw_sz.x * 0.5, iy + 25 - idraw_sz.y * 0.5)
+			_d_texture_rect(item["icon"], Rect2(idraw_pos, idraw_sz), false)
 
 func _draw_input_debug_overlay(vp: Vector2):
 	var marker := _debug_last_input_viewport
