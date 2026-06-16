@@ -10,10 +10,13 @@ var username_input: LineEdit
 var password_input: LineEdit
 var action_button: Button
 var mode_toggle: Button
+var _cn_font: Font = null
 var is_register_mode := false
 var pending_action := ""
 
 func _ready() -> void:
+	_load_cn_font()
+
 	# Try auto-login from saved token
 	if _try_auto_login():
 		return
@@ -52,10 +55,20 @@ func _try_auto_login() -> bool:
 	status_label = Label.new()
 	status_label.text = "正在验证登录..."
 	status_label.position = Vector2(vp.x / 2 - 80, vp.y / 2)
+	_apply_cn_font(status_label)
 	status_label.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
 	status_label.add_theme_font_size_override("font_size", 18)
 	add_child(status_label)
 	return true
+
+func _load_cn_font() -> void:
+	var font_path := "res://assets/fonts/simhei.ttf"
+	if ResourceLoader.exists(font_path):
+		_cn_font = load(font_path) as Font
+
+func _apply_cn_font(control: Control) -> void:
+	if _cn_font != null:
+		control.add_theme_font_override("font", _cn_font)
 
 func _on_validate_completed(result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray, token: String, user_info: Dictionary) -> void:
 	if result == HTTPRequest.RESULT_SUCCESS and response_code == 200:
@@ -109,6 +122,7 @@ func _build_ui() -> void:
 	var title := Label.new()
 	title.text = "QQ 农场"
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_apply_cn_font(title)
 	title.add_theme_font_size_override("font_size", 28)
 	vbox.add_child(title)
 
@@ -116,38 +130,45 @@ func _build_ui() -> void:
 	subtitle.name = "Subtitle"
 	subtitle.text = "登录"
 	subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_apply_cn_font(subtitle)
 	subtitle.add_theme_font_size_override("font_size", 16)
 	subtitle.add_theme_color_override("font_color", Color(0.7, 0.6, 0.4))
 	vbox.add_child(subtitle)
 
 	var user_label := Label.new()
 	user_label.text = "用户名"
+	_apply_cn_font(user_label)
 	vbox.add_child(user_label)
 
 	username_input = LineEdit.new()
 	username_input.placeholder_text = "输入用户名 (3-32字符)"
 	username_input.max_length = 32
+	_apply_cn_font(username_input)
 	vbox.add_child(username_input)
 
 	var pass_label := Label.new()
 	pass_label.text = "密码"
+	_apply_cn_font(pass_label)
 	vbox.add_child(pass_label)
 
 	password_input = LineEdit.new()
 	password_input.placeholder_text = "输入密码 (至少6位)"
 	password_input.secret = true
 	password_input.max_length = 64
+	_apply_cn_font(password_input)
 	vbox.add_child(password_input)
 
 	action_button = Button.new()
 	action_button.text = "登 录"
 	action_button.custom_minimum_size = Vector2(0, 40)
+	_apply_cn_font(action_button)
 	action_button.pressed.connect(_on_action_pressed)
 	vbox.add_child(action_button)
 
 	mode_toggle = Button.new()
 	mode_toggle.text = "没有账号？点此注册"
 	mode_toggle.flat = true
+	_apply_cn_font(mode_toggle)
 	mode_toggle.add_theme_color_override("font_color", Color(0.5, 0.7, 1.0))
 	mode_toggle.add_theme_color_override("font_hover_color", Color(0.7, 0.85, 1.0))
 	mode_toggle.pressed.connect(_on_mode_toggle)
@@ -155,6 +176,7 @@ func _build_ui() -> void:
 
 	status_label = Label.new()
 	status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_apply_cn_font(status_label)
 	status_label.add_theme_color_override("font_color", Color(1.0, 0.5, 0.4))
 	status_label.add_theme_font_size_override("font_size", 14)
 	vbox.add_child(status_label)

@@ -1,6 +1,12 @@
-sandbox_mode = "workspace-write"
+sandbox_mode = "danger-full-access"
 [mcp_servers.godot-mcp]
 url = "http://localhost:19080/mcp"
+
+[mcp_servers.godot-mcp.tools.simulate_runtime_input_event]
+approval_mode = "approve"
+
+[mcp_servers.godot-mcp.tools.clear_output]
+approval_mode = "approve"
 
 [sandbox_workspace_write]
 network_access = true

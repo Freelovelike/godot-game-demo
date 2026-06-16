@@ -775,40 +775,9 @@ texture = ExtResource("2_o1bn1")
 centered = false
 
 [node name="PlotPreview" type="Node2D" parent="." unique_id=1352123784]
-visible = false
 z_index = 100
 position = Vector2(150, 55)
 script = ExtResource("3_xqpul")
-
-[node name="ShopOverlay" type="Control" parent="." unique_id=830872335]
-visible = false
-layout_mode = 3
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-script = ExtResource("4_shop")
-
-[node name="InventoryOverlay" type="Control" parent="." unique_id=770139293]
-visible = false
-layout_mode = 3
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-script = ExtResource("5_inv")
-
-[node name="SettingsOverlay" type="Control" parent="." unique_id=1121103167]
-visible = false
-layout_mode = 3
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-script = ExtResource("6_set")
 
 [node name="UILayer" type="CanvasLayer" parent="." unique_id=1239696688]
 
@@ -821,3 +790,33 @@ grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
 script = ExtResource("7_ui")
+
+[node name="ShopOverlay" type="Control" parent="UILayer" unique_id=135957798]
+visible = false
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("4_shop")
+
+[node name="InventoryOverlay" type="Control" parent="UILayer" unique_id=1584534584]
+visible = false
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("5_inv")
+
+[node name="SettingsOverlay" type="Control" parent="UILayer" unique_id=1042952402]
+visible = false
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("6_set")

@@ -107,6 +107,11 @@ var _touch_cam_start := Vector2.ZERO
 # UI 绘制目标（CanvasLayer 子节点，画在屏幕坐标系）
 var _ui_draw_target: CanvasItem = null
 var _ui_overlay: Control = null
+var _debug_last_input_raw := Vector2.ZERO
+var _debug_last_input_viewport := Vector2.ZERO
+var _debug_last_input_world := Vector2.ZERO
+var _debug_last_toolbar_hit := -1
+var _debug_last_tile_hit := Vector2i(-1, -1)
 # 中文字体
 var _cn_font: Font = null
 
@@ -238,7 +243,7 @@ func _clamp_camera():
 
 func _init_overlays():
 	# ---- ShopOverlay ----
-	var shop := get_node_or_null("ShopOverlay")
+	var shop := get_node_or_null("UILayer/ShopOverlay")
 	if shop == null:
 		return
 	shop.CROPS = CROPS
@@ -294,7 +299,7 @@ func _init_overlays():
 	)
 
 	# ---- InventoryOverlay ----
-	var inv := get_node_or_null("InventoryOverlay")
+	var inv := get_node_or_null("UILayer/InventoryOverlay")
 	if inv:
 		inv.CROPS = CROPS
 		inv.CROP_COLORS = CROP_COLORS
@@ -321,7 +326,7 @@ func _init_overlays():
 		)
 
 	# ---- SettingsOverlay ----
-	var setn := get_node_or_null("SettingsOverlay")
+	var setn := get_node_or_null("UILayer/SettingsOverlay")
 	if setn:
 		setn.logout_requested.connect(func():
 			setn.visible = false
@@ -348,11 +353,11 @@ func _sync_shop_data(shop):
 
 func _sync_all_overlays():
 	# Refresh any open overlay with latest state
-	var shop := get_node_or_null("ShopOverlay")
+	var shop := get_node_or_null("UILayer/ShopOverlay")
 	if shop and shop_open:
 		_sync_shop_data(shop)
 		shop.queue_redraw()
-	var inv := get_node_or_null("InventoryOverlay")
+	var inv := get_node_or_null("UILayer/InventoryOverlay")
 	if inv and inventory_open:
 		inv.inventory = inventory
 		inv.queue_redraw()
@@ -476,9 +481,15 @@ func _init_sandy_base():
 func iso2screen(c: int, r: int) -> Vector2:
 	return Vector2(OX + (c - r) * TW * 0.5, OY + (c + r) * TH * 0.5)
 
-# 屏幕坐标 → 世界坐标（用于地块点击检测）
+func _window_to_viewport_pos(window_pos: Vector2) -> Vector2:
+	return window_pos
+
+func _viewport_to_world(viewport_pos: Vector2) -> Vector2:
+	return get_viewport().get_canvas_transform().affine_inverse() * viewport_pos
+
+# 窗口输入坐标 → 世界坐标（用于地块点击检测）
 func _screen_to_world(screen_pos: Vector2) -> Vector2:
-	return get_viewport().get_canvas_transform().affine_inverse() * screen_pos
+	return _viewport_to_world(_window_to_viewport_pos(screen_pos))
 
 func _get_plot_position(c: int, r: int) -> Vector2:
 	var anchors := get_node_or_null(PLOT_ANCHORS_PATH)
@@ -730,11 +741,12 @@ func _unhandled_input(event: InputEvent):
 	# ---- 触屏：手指按下/抬起 ----
 	if event is InputEventScreenTouch:
 		if event.pressed:
-			_touch_positions[event.index] = event.position
+			var touch_pos := _window_to_viewport_pos(event.position)
+			_touch_positions[event.index] = touch_pos
 			_touch_count += 1
 			if _touch_count == 1:
 				# 单指按下：准备拖拽
-				_touch_pan_start = event.position
+				_touch_pan_start = touch_pos
 				_touch_cam_start = cam.position
 			elif _touch_count == 2:
 				# 双指按下：准备缩放
@@ -746,7 +758,8 @@ func _unhandled_input(event: InputEvent):
 		else:
 			if _touch_count == 1 and event.index in _touch_positions:
 				# 单指抬起：如果没有明显移动，当作点击
-				var moved: float = _touch_positions[event.index].distance_to(event.position)
+				var touch_pos := _window_to_viewport_pos(event.position)
+				var moved: float = _touch_positions[event.index].distance_to(touch_pos)
 				if moved < 15.0:
 					_handle_click(event.position)
 			_touch_positions.erase(event.index)
@@ -755,10 +768,11 @@ func _unhandled_input(event: InputEvent):
 
 	# ---- 触屏：手指移动 ----
 	if event is InputEventScreenDrag:
-		_touch_positions[event.index] = event.position
+		var touch_pos := _window_to_viewport_pos(event.position)
+		_touch_positions[event.index] = touch_pos
 		if _touch_count == 1:
 			# 单指拖拽：平移相机
-			var delta_screen: Vector2 = _touch_pan_start - event.position
+			var delta_screen: Vector2 = _touch_pan_start - touch_pos
 			var delta_world: Vector2 = delta_screen / cam.zoom
 			cam.position = _touch_cam_start + delta_world
 			_clamp_camera()
@@ -780,12 +794,13 @@ func _unhandled_input(event: InputEvent):
 	if event is InputEventMouseButton and (event.button_index == MOUSE_BUTTON_MIDDLE or event.button_index == MOUSE_BUTTON_RIGHT):
 		_cam_dragging = event.pressed
 		if _cam_dragging:
-			_cam_drag_start = event.position
+			_cam_drag_start = _window_to_viewport_pos(event.position)
 			_cam_start_pos = cam.position
 		return
 
 	if event is InputEventMouseMotion and _cam_dragging:
-		var delta_screen: Vector2 = _cam_drag_start - event.position
+		var mouse_pos := _window_to_viewport_pos(event.position)
+		var delta_screen: Vector2 = _cam_drag_start - mouse_pos
 		var delta_world: Vector2 = delta_screen / cam.zoom
 		cam.position = _cam_start_pos + delta_world
 		# 限制平移范围，保持地块在视野内
@@ -797,6 +812,7 @@ func _unhandled_input(event: InputEvent):
 	if event is InputEventMouseButton and event.pressed:
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP or event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
 			var vp: Vector2 = get_viewport().get_visible_rect().size
+			var mouse_pos := _window_to_viewport_pos(event.position)
 			var old_zoom := cam.zoom.x
 			if event.button_index == MOUSE_BUTTON_WHEEL_UP:
 				cam.zoom *= 1.1
@@ -807,7 +823,7 @@ func _unhandled_input(event: InputEvent):
 			if new_zoom != old_zoom:
 				# 以鼠标位置为中心缩放：计算鼠标在世界坐标中的位置，缩放后保持不变
 				var vp_center: Vector2 = vp * 0.5
-				var mouse_offset: Vector2 = event.position - vp_center
+				var mouse_offset: Vector2 = mouse_pos - vp_center
 				var world_offset: Vector2 = mouse_offset / old_zoom
 				cam.position += world_offset * (1.0 - old_zoom / new_zoom)
 			_clamp_camera()
@@ -825,8 +841,12 @@ func _unhandled_input(event: InputEvent):
 
 	# --- Mouse motion ---
 	if event is InputEventMouseMotion:
+		var mouse_pos := _window_to_viewport_pos(event.position)
+		_debug_last_input_raw = event.position
+		_debug_last_input_viewport = mouse_pos
 		# 地块 hover 用世界坐标
-		var wp := _screen_to_world(event.position)
+		var wp := _viewport_to_world(mouse_pos)
+		_debug_last_input_world = wp
 		var wx: float = wp.x
 		var wy: float = wp.y
 		hover_col = -1
@@ -851,12 +871,18 @@ func _unhandled_input(event: InputEvent):
 
 	# --- Mouse button down ---
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
-		var mx: float = event.position.x
-		var my: float = event.position.y
+		var mouse_pos := _window_to_viewport_pos(event.position)
+		var mx: float = mouse_pos.x
+		var my: float = mouse_pos.y
 		# 地块点击用世界坐标
-		var wp := _screen_to_world(event.position)
+		var wp := _viewport_to_world(mouse_pos)
 		var wx: float = wp.x
 		var wy: float = wp.y
+		_debug_last_input_raw = event.position
+		_debug_last_input_viewport = mouse_pos
+		_debug_last_input_world = wp
+		_debug_last_toolbar_hit = -1
+		_debug_last_tile_hit = Vector2i(-1, -1)
 		mouse_held = false  # only set true if click is on the grid
 
 		# Check reclaim confirmation overlay (屏幕坐标)
@@ -923,43 +949,11 @@ func _unhandled_input(event: InputEvent):
 			for col in range(COLS):
 				var sp := _get_plot_position(col, row)
 				if in_diamond(wx, wy, sp.x, sp.y):
+					_debug_last_tile_hit = Vector2i(col, row)
 					mouse_held = true
 					_do_tile_action(col, row)
 					last_action_col = col
 					last_action_row = row
-					queue_redraw()
-					return
-
-		# Top toolbar buttons (right side) — 背包 / 商店 / 设置 (屏幕坐标)
-		mouse_held = false
-		var tb_btn_w := 72.0; var tb_btn_gap := 10.0
-		var tb_count := 3
-		var tb_total_w: float = tb_count * tb_btn_w + (tb_count - 1) * tb_btn_gap
-		var tb_start_x: float = vp.x - tb_total_w - 14
-		if my >= 8 and my <= 52:
-			for i in range(tb_count):
-				var btn_x: float = tb_start_x + i * (tb_btn_w + tb_btn_gap)
-				if mx >= btn_x and mx <= btn_x + tb_btn_w:
-					match i:
-						0:
-							var shop := get_node_or_null("ShopOverlay")
-							if shop:
-								_sync_shop_data(shop)
-								shop._skip_input = true
-								shop.visible = true
-						1:
-							var inv := get_node_or_null("InventoryOverlay")
-							if inv:
-								inv.inventory = inventory
-								inv._skip_input = true
-								inv.visible = true
-						2:
-							var setn := get_node_or_null("SettingsOverlay")
-							if setn:
-								setn.auth_token = auth_token
-								setn.user_info = user_info
-								setn._skip_input = true
-								setn.visible = true
 					queue_redraw()
 					return
 
@@ -973,6 +967,7 @@ func _unhandled_input(event: InputEvent):
 			for ti in range(10):
 				var bx2: float = tb_sx + ti * (tb_btn_s + tb_btn_g)
 				if mx >= bx2 and mx <= bx2 + tb_btn_s:
+					_debug_last_toolbar_hit = ti
 					_set_tool_mode(ti)
 					var mode_names2 := ["普通", "浇水", "施肥", "收获", "铲除", "全铲", "除虫", "除草", "全收", "仓库"]
 					toast_text = "切换到: " + mode_names2[ti] + "模式"
@@ -1035,12 +1030,41 @@ func _do_tile_action(col: int, row: int):
 			warehouse_open = true
 			queue_redraw()
 
+func _open_top_toolbar_overlay(index: int):
+	mouse_held = false
+	match index:
+		0:
+			var shop := get_node_or_null("UILayer/ShopOverlay")
+			if shop:
+				_sync_shop_data(shop)
+				shop.visible = true
+				shop_open = true
+		1:
+			var inv := get_node_or_null("UILayer/InventoryOverlay")
+			if inv:
+				inv.inventory = inventory
+				inv.visible = true
+				inventory_open = true
+		2:
+			var setn := get_node_or_null("UILayer/SettingsOverlay")
+			if setn:
+				setn.auth_token = auth_token
+				setn.user_info = user_info
+				setn.visible = true
+				settings_open = true
+	queue_redraw()
+
 # 触屏点击 → 模拟地块/UI 交互
 func _handle_click(screen_pos: Vector2):
 	var vp: Vector2 = get_viewport().get_visible_rect().size
-	var mx: float = screen_pos.x
-	var my: float = screen_pos.y
-	var wp := _screen_to_world(screen_pos)
+	var viewport_pos := _window_to_viewport_pos(screen_pos)
+	var mx: float = viewport_pos.x
+	var my: float = viewport_pos.y
+	_debug_last_input_raw = screen_pos
+	_debug_last_input_viewport = viewport_pos
+	_debug_last_input_world = _viewport_to_world(viewport_pos)
+	_debug_last_toolbar_hit = -1
+	_debug_last_tile_hit = Vector2i(-1, -1)
 	# 确认框（复用鼠标逻辑）
 	if reclaim_confirm_open or shovel_all_confirm_open or warehouse_open or reset_confirm_open:
 		# 模拟左键点击，让已有逻辑处理
@@ -1050,6 +1074,7 @@ func _handle_click(screen_pos: Vector2):
 		fake.position = screen_pos
 		_unhandled_input(fake)
 		return
+	var wp := _viewport_to_world(viewport_pos)
 	# 地块点击（世界坐标）
 	for row in range(ROWS):
 		for col in range(COLS):
@@ -1057,6 +1082,7 @@ func _handle_click(screen_pos: Vector2):
 				continue
 			var sp := _get_plot_position(col, row)
 			if in_diamond(wp.x, wp.y, sp.x, sp.y):
+				_debug_last_tile_hit = Vector2i(col, row)
 				_do_tile_action(col, row)
 				queue_redraw()
 				return
@@ -1070,29 +1096,10 @@ func _handle_click(screen_pos: Vector2):
 		for ti in range(10):
 			var bx: float = tb_sx + ti * (tb_btn_s + tb_btn_g)
 			if mx >= bx and mx <= bx + tb_btn_s:
+				_debug_last_toolbar_hit = ti
 				_set_tool_mode(ti)
 				queue_redraw()
 				return
-	# 右上按钮
-	var tb_btn_w := 72.0; var tb_btn_gap := 10.0
-	var tb_start_x: float = vp.x - 3.0 * tb_btn_w - 2.0 * tb_btn_gap - 14
-	if my >= 8 and my <= 52:
-		for i in range(3):
-			var bx: float = tb_start_x + i * (tb_btn_w + tb_btn_gap)
-			if mx >= bx and mx <= bx + tb_btn_w:
-				match i:
-					0:
-						var shop := get_node_or_null("ShopOverlay")
-						if shop: _sync_shop_data(shop); shop.visible = true
-					1:
-						var inv := get_node_or_null("InventoryOverlay")
-						if inv: inv.inventory = inventory; inv.visible = true
-					2:
-						var setn := get_node_or_null("SettingsOverlay")
-						if setn: setn.auth_token = auth_token; setn.user_info = user_info; setn.visible = true
-				queue_redraw()
-				return
-
 # ---- Server action API ----
 func _send_action(action: String, params: Dictionary = {}):
 	if auth_token.is_empty():
@@ -2173,37 +2180,6 @@ func _draw_ui(caller: CanvasItem):
 	var unlocked_count := _get_unlocked_plot_count()
 	_draw_text(150, 32, "地:" + str(unlocked_count) + "/30", 10, Color(0.7, 0.65, 0.5))
 
-	# ---- TOP TOOLBAR (right) — cartoon buttons ----
-	var toolbar_btns := [
-		{"label": "商店", "color": Color(0.22, 0.65, 0.28), "dark": Color(0.14, 0.45, 0.18)},
-		{"label": "背包", "color": Color(0.55, 0.28, 0.68), "dark": Color(0.38, 0.18, 0.48)},
-		{"label": "设置", "color": Color(0.4, 0.42, 0.5), "dark": Color(0.28, 0.3, 0.36)},
-	]
-	var tb_count: int = toolbar_btns.size()
-	var tb_btn_w := 72.0; var tb_btn_h := 46.0; var tb_gap := 10.0
-	var tb_total_w: float = tb_count * tb_btn_w + (tb_count - 1) * tb_gap
-	var toolbar_x: float = vp.x - tb_total_w - 14
-	for i in range(tb_count):
-		var bx: float = toolbar_x + i * (tb_btn_w + tb_gap)
-		var by: float = 8.0
-		var btn_info: Dictionary = toolbar_btns[i]
-		var col: Color = btn_info["color"]
-		var dk: Color = btn_info["dark"]
-		# Shadow
-		_d_rect(Rect2(bx + 2, by + 3, tb_btn_w, tb_btn_h), Color(0, 0, 0, 0.3))
-		# Body
-		_d_rect(Rect2(bx, by, tb_btn_w, tb_btn_h - 4), col)
-		# Bottom edge (darker, 3D effect)
-		_d_rect(Rect2(bx, by + tb_btn_h - 6, tb_btn_w, 4), dk)
-		# Outline
-		_d_rect(Rect2(bx, by, tb_btn_w, tb_btn_h - 2), Color(0.1, 0.08, 0.04), false, 2)
-		# Highlight top
-		_d_rect(Rect2(bx + 3, by + 2, tb_btn_w - 6, 3), Color(1, 1, 1, 0.25))
-		# Label centered
-		var lbl: String = btn_info["label"]
-		var lbl_w: float = (_cn_font if _cn_font != null else ThemeDB.fallback_font).get_string_size(lbl, HORIZONTAL_ALIGNMENT_LEFT, -1, 18).x
-		_draw_text(bx + (tb_btn_w - lbl_w) / 2, by + 12, lbl, 18, Color(1, 1, 1))
-
 	if reset_confirm_open:
 		_draw_reset_confirm()
 
@@ -2215,34 +2191,43 @@ func _draw_ui(caller: CanvasItem):
 		_d_rect(Rect2(tx, vp.y - 50, tw, 38), Color(0, 0, 0, 0.8 * alpha))
 		_draw_text(tx + 25, vp.y - 43, toast_text, 18, Color(1, 1, 1, alpha))
 
-	# ---- Debug info (右上角) ----
-	if cam:
-		var grid_size_debug := Vector2.ZERO
-		var anchors := get_node_or_null(PLOT_ANCHORS_PATH)
-		if anchors:
-			var gmin := Vector2(INF, INF)
-			var gmax := Vector2(-INF, -INF)
-			for child in anchors.get_children():
-				if child is Node2D:
-					gmin.x = minf(gmin.x, child.position.x)
-					gmin.y = minf(gmin.y, child.position.y)
-					gmax.x = maxf(gmax.x, child.position.x)
-					gmax.y = maxf(gmax.y, child.position.y)
-			grid_size_debug = gmax - gmin + Vector2(TW, TH)
-		var ws := get_viewport().get_visible_rect().size
-		var dbg_lines := [
-			"Viewport: %d x %d" % [int(ws.x), int(ws.y)],
-			"Grid: %d x %d" % [int(grid_size_debug.x), int(grid_size_debug.y)],
-			"Zoom: %.2f  Min: %.2f" % [cam.zoom.x, _cam_min_zoom],
-			"Cam: %.0f, %.0f" % [cam.position.x, cam.position.y],
-		]
-		var dbg_x: float = vp.x - 220
-		var dbg_y: float = 10.0
-		_d_rect(Rect2(dbg_x - 4, dbg_y - 2, 216, dbg_lines.size() * 18 + 8), Color(0, 0, 0, 0.7))
-		for i in range(dbg_lines.size()):
-			_draw_text(dbg_x, dbg_y + i * 18, dbg_lines[i], 13, Color(0.8, 1.0, 0.8))
+	_draw_input_debug_overlay(vp)
 
 	_ui_draw_target = null
+
+func _draw_input_debug_overlay(vp: Vector2):
+	var marker := _debug_last_input_viewport
+	if marker == Vector2.ZERO and _debug_last_input_raw == Vector2.ZERO:
+		return
+	_d_line(marker + Vector2(-14, 0), marker + Vector2(14, 0), Color(1.0, 0.2, 0.2, 0.95), 2.0)
+	_d_line(marker + Vector2(0, -14), marker + Vector2(0, 14), Color(1.0, 0.2, 0.2, 0.95), 2.0)
+	_d_circle(marker, 4.0, Color(1.0, 1.0, 0.2, 0.95))
+
+	var debug_x := 18.0
+	var debug_y := vp.y - 118.0
+	_d_rect(Rect2(debug_x, debug_y, 310, 96), Color(0.04, 0.04, 0.04, 0.82))
+	_draw_text(debug_x + 10, debug_y + 8, "raw=" + str(_debug_last_input_raw), 12, Color(1, 1, 1))
+	_draw_text(debug_x + 10, debug_y + 26, "vp=" + str(_debug_last_input_viewport), 12, Color(1, 1, 1))
+	_draw_text(debug_x + 10, debug_y + 44, "world=" + str(_debug_last_input_world), 12, Color(1, 1, 1))
+	_draw_text(debug_x + 10, debug_y + 62, "tool=" + str(_debug_last_toolbar_hit), 12, Color(1, 0.9, 0.3))
+	_draw_text(debug_x + 10, debug_y + 80, "tile=" + str(_debug_last_tile_hit), 12, Color(0.5, 1.0, 0.5))
+
+	if _debug_last_toolbar_hit >= 0:
+		var btn_size: float = 58.0
+		var btn_gap: float = 8.0
+		var tb_total: float = 10.0 * btn_size + 9.0 * btn_gap
+		var tb_start_x: float = vp.x * 0.5 - tb_total * 0.5
+		var tb_y: float = vp.y - 78.0
+		var bx: float = tb_start_x + _debug_last_toolbar_hit * (btn_size + btn_gap)
+		_d_rect(Rect2(bx, tb_y, btn_size, btn_size), Color(1.0, 0.25, 0.25, 0.0), false, 3.0)
+
+	if _debug_last_tile_hit.x >= 0 and _debug_last_tile_hit.y >= 0:
+		var sp := _get_plot_position(_debug_last_tile_hit.x, _debug_last_tile_hit.y)
+		var corners := iso_visual_corners(sp.x, sp.y)
+		for i in range(corners.size()):
+			var a: Vector2 = corners[i]
+			var b: Vector2 = corners[(i + 1) % corners.size()]
+			_d_line(a, b, Color(0.2, 1.0, 0.2, 0.95), 3.0)
 
 func _draw_reclaim_confirm():
 	var rect := _get_reclaim_confirm_rect()

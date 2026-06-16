@@ -27,6 +27,7 @@ func _input(event: InputEvent):
 		return
 	var mb := event as InputEventMouseButton
 	if mb == null or mb.button_index != MOUSE_BUTTON_LEFT: return
+	if not mb.pressed: return
 	get_viewport().set_input_as_handled()
 	var sw := 360.0; var sh := 280.0
 	var sx := (size.x - sw) * 0.5; var sy := (size.y - sh) * 0.5
