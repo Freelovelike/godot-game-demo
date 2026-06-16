@@ -77,6 +77,12 @@ func _make_button_style(color: Color, border_color: Color) -> StyleBoxFlat:
 func _on_top_button_pressed(index: int):
 	if farm_ref == null or not is_instance_valid(farm_ref):
 		return
+	# 有确认弹窗开着时，顶部按钮不响应（否则 Button 节点会穿透弹窗）
+	if farm_ref.reclaim_confirm_open \
+			or farm_ref.shovel_all_confirm_open \
+			or farm_ref.reset_confirm_open \
+			or farm_ref.warehouse_open:
+		return
 	if farm_ref.has_method("_open_top_toolbar_overlay"):
 		farm_ref._open_top_toolbar_overlay(index)
 
