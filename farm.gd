@@ -2,7 +2,7 @@ extends Node2D
 
 const CropAtlas = preload("res://scripts/crop_atlas.gd")
 const TOOL_ICON_TEXTURES: Array[Texture2D] = [
-	preload("res://assets/ui/icons/tool_select.png"),
+	null,
 	preload("res://assets/ui/icons/tool_water.png"),
 	preload("res://assets/ui/icons/tool_fertilizer.png"),
 	preload("res://assets/ui/icons/tool_harvest.png"),
@@ -13,6 +13,8 @@ const TOOL_ICON_TEXTURES: Array[Texture2D] = [
 	preload("res://assets/ui/icons/btn_harvest_all.png"),
 	preload("res://assets/ui/icons/btn_warehouse.png"),
 ]
+const TOOLBAR_BG_TEXTURE: Texture2D = preload("res://assets/ui/toolbar_bg.png")
+var _toolbar_bg_style: StyleBoxTexture = null
 const TOOL_CURSOR_MAX_SIZE := 48
 const LAND_TEXTURE_PATHS := {
 	"locked": "res://assets/land/land_grass_locked.png",
@@ -82,24 +84,24 @@ var toast_text := ""
 var toast_timer := 0.0
 var save_timer := 0.0
 var event_check_timer := 0.0
-var _game_time := 0.0   # 游戏内累计秒数，用于保护期判断
+var _game_time := 0.0 # 游戏内累计秒数，用于保护期判断
 
 # Auth state (set from Login scene)
 var auth_token := ""
 var user_info := {}
 var http: HTTPRequest
-var _save_pending := false   # 云端保存中
-var _http_cb: Callable = Callable()  # 当前HTTP回调
+var _save_pending := false # 云端保存中
+var _http_cb: Callable = Callable() # 当前HTTP回调
 
 # Camera 拖拽缩放
 var cam: Camera2D
 var _cam_dragging := false
 var _cam_drag_start := Vector2.ZERO
 var _cam_start_pos := Vector2.ZERO
-var _cam_min_zoom := 1.0  # 由 _fit_camera_to_screen 动态更新
+var _cam_min_zoom := 1.0 # 由 _fit_camera_to_screen 动态更新
 # 触屏状态
 var _touch_count := 0
-var _touch_positions := {}  # {finger_index: Vector2}
+var _touch_positions := {} # {finger_index: Vector2}
 var _pinch_start_dist := 0.0
 var _pinch_start_zoom := 1.0
 var _touch_pan_start := Vector2.ZERO
@@ -119,17 +121,17 @@ var _cn_font: Font = null
 # [名称, 金币价, 类型, 效果值, 可用阶段列表, 每株上限, max_minutes_limit]
 # 类型: speed=减生长时间, water_protect/bug_protect/weed_protect=保护期, yield_bonus=增产
 var FERTILIZERS: Array = [
-	["初级速生肥", 15,  "speed",         0.08,  [0, 1],       1,  10],
-	["中级速生肥", 40,  "speed",         0.12,  [1, 2],       1,  30],
-	["高级速生肥", 80,  "speed",         0.18,  [2],          1,  60],
-	["保湿肥",     30,  "water_protect", 7200.0,[0, 1, 2],    1,  0],
-	["防虫肥",     35,  "bug_protect",   7200.0,[1, 2],       1,  0],
-	["除草剂",     25,  "weed_protect",  7200.0,[-1, 0, 1, 2],1,  0],
-	["丰收肥",     60,  "yield_bonus",   0.10,  [2],          1,  0],
+	["初级速生肥", 15, "speed", 0.08, [0, 1], 1, 10],
+	["中级速生肥", 40, "speed", 0.12, [1, 2], 1, 30],
+	["高级速生肥", 80, "speed", 0.18, [2], 1, 60],
+	["保湿肥", 30, "water_protect", 7200.0, [0, 1, 2], 1, 0],
+	["防虫肥", 35, "bug_protect", 7200.0, [1, 2], 1, 0],
+	["除草剂", 25, "weed_protect", 7200.0, [-1, 0, 1, 2], 1, 0],
+	["丰收肥", 60, "yield_bonus", 0.10, [2], 1, 0],
 ]
-var fertilizer_inventory = {}   # {fert_index: count}
-var selected_fertilizer = -1    # FERTILIZERS数组下标，-1=未选择
-var shop_tab := 0               # 0=种子, 1=肥料
+var fertilizer_inventory = {} # {fert_index: count}
+var selected_fertilizer = -1 # FERTILIZERS数组下标，-1=未选择
+var shop_tab := 0 # 0=种子, 1=肥料
 
 func _ready():
 	# 加载中文字体
@@ -155,15 +157,15 @@ func _ready():
 		# [0]名称,[1]种子价,[2]旧售价,[3]成熟秒,[4]key,
 		# [5]base_yield,[6]unit_sell,[7]min_yield,[8]max_yield,
 		# [9]dry/h,[10]bug/h,[11]weed/h,[12]max_bug,[13]max_weed
-		["生菜",   12, 32,  12,  "lettuce",     4,  8, 3, 5,  0.06, 0,    0.04, 0, 1],
-		["辣椒",   20, 58,  20,  "pepper",      6, 10, 4, 7,  0.10, 0.05, 0.05, 1, 1],
-		["茄子",   35, 95,  32,  "eggplant",    5, 19, 3, 6,  0.10, 0.08, 0.08, 2, 2],
-		["西红柿", 55, 150, 48,  "tomato",      8, 19, 6,10,  0.14, 0.09, 0.07, 2, 2],
-		["草莓",   80, 220, 70,  "strawberry", 12, 18, 9,14,  0.16, 0.12, 0.10, 2, 2],
-		["玉米",  120, 340, 100, "corn",        6, 57, 4, 7,  0.18, 0.07, 0.12, 2, 3],
-		["向日葵",170, 500, 135, "sunflower",   4,125, 3, 5,  0.13, 0.04, 0.09, 1, 2],
-		["南瓜",  240, 720, 180, "pumpkin",     3,240, 2, 4,  0.12, 0.11, 0.15, 3, 3],
-		["西瓜",  320, 980, 230, "watermelon",  5,196, 3, 7,  0.20, 0.12, 0.14, 3, 3],
+		["生菜", 12, 32, 12, "lettuce", 4, 8, 3, 5, 0.06, 0, 0.04, 0, 1],
+		["辣椒", 20, 58, 20, "pepper", 6, 10, 4, 7, 0.10, 0.05, 0.05, 1, 1],
+		["茄子", 35, 95, 32, "eggplant", 5, 19, 3, 6, 0.10, 0.08, 0.08, 2, 2],
+		["西红柿", 55, 150, 48, "tomato", 8, 19, 6, 10, 0.14, 0.09, 0.07, 2, 2],
+		["草莓", 80, 220, 70, "strawberry", 12, 18, 9, 14, 0.16, 0.12, 0.10, 2, 2],
+		["玉米", 120, 340, 100, "corn", 6, 57, 4, 7, 0.18, 0.07, 0.12, 2, 3],
+		["向日葵", 170, 500, 135, "sunflower", 4, 125, 3, 5, 0.13, 0.04, 0.09, 1, 2],
+		["南瓜", 240, 720, 180, "pumpkin", 3, 240, 2, 4, 0.12, 0.11, 0.15, 3, 3],
+		["西瓜", 320, 980, 230, "watermelon", 5, 196, 3, 7, 0.20, 0.12, 0.14, 3, 3],
 	]
 	CROP_COLORS = [
 		[Color(0.42, 0.76, 0.34), Color(0.72, 0.96, 0.46)],
@@ -452,8 +454,8 @@ func _init_sandy_base():
 	var n1 := Vector2(e1.y, -e1.x)
 	var pad_vecs: Array[Vector2] = [
 		n0 * SANDY_BASE_PAD + n1 * SANDY_BASE_PAD,
-		-n0 * SANDY_BASE_PAD + n1 * SANDY_BASE_PAD,
-		-n0 * SANDY_BASE_PAD - n1 * SANDY_BASE_PAD,
+		- n0 * SANDY_BASE_PAD + n1 * SANDY_BASE_PAD,
+		- n0 * SANDY_BASE_PAD - n1 * SANDY_BASE_PAD,
 		n0 * SANDY_BASE_PAD - n1 * SANDY_BASE_PAD,
 	]
 	var expanded: PackedVector2Array
@@ -502,15 +504,15 @@ func _get_plot_position(c: int, r: int) -> Vector2:
 func _create_empty_cell(col: int, row: int) -> Dictionary:
 	var initial_land_level := 1 if _get_plot_index(col, row) < INITIAL_UNLOCKED_PLOTS else LAND_LEVEL_LOCKED
 	return {
-		"crop_id": -1,
+		"crop_id": - 1,
 		"progress": 0.0,
 		"wet_timer": 0.0,
 		"unlocked": initial_land_level > LAND_LEVEL_LOCKED,
 		"land_level": initial_land_level,
 		"land_work": 0,
 		# 打理状态
-		"water_state": 0,         # 0=Normal, 1=Dry, 2=Watered
-		"dry_timer": 0.0,         # 缺水累计秒数（产量惩罚用）
+		"water_state": 0, # 0=Normal, 1=Dry, 2=Watered
+		"dry_timer": 0.0, # 缺水累计秒数（产量惩罚用）
 		"water_protect_until": 0.0,
 		"bug_count": 0,
 		"bug_since": 0.0,
@@ -610,7 +612,7 @@ func _process(delta: float):
 	if save_timer >= 30.0:
 		save_timer = 0.0
 		if not auth_token.is_empty():
-			_cloud_load()  # 定期从服务端同步最新状态
+			_cloud_load() # 定期从服务端同步最新状态
 	if toast_timer > 0.0:
 		toast_timer -= delta
 		if toast_timer <= 0.0:
@@ -621,12 +623,12 @@ func _process(delta: float):
 
 func _get_crop_stage_enum(prog: float) -> int:
 	if prog < 0.18:
-		return 0  # 种子期
+		return 0 # 种子期
 	if prog < 0.45:
-		return 1  # 发芽期
+		return 1 # 发芽期
 	if prog < 0.90:
-		return 2  # 生长期
-	return 3      # 成熟期
+		return 2 # 生长期
+	return 3 # 成熟期
 
 func _check_events():
 	var stage_mult := [0.5, 1.0, 1.2, 0.0]
@@ -649,7 +651,7 @@ func _check_events():
 				if _game_time >= float(cell.get("water_protect_until", 0.0)):
 					var dry_rate: float = float(CROPS[cid][9])
 					if randf() < dry_rate * check_hours * sm:
-						cell["water_state"] = 1  # DRY
+						cell["water_state"] = 1 # DRY
 
 			# 虫害事件
 			var max_bugs: int = int(CROPS[cid][12])
@@ -881,7 +883,7 @@ func _input(event: InputEvent):
 		_debug_last_input_world = wp
 		_debug_last_toolbar_hit = -1
 		_debug_last_tile_hit = Vector2i(-1, -1)
-		mouse_held = false  # only set true if click is on the grid
+		mouse_held = false # only set true if click is on the grid
 
 		# Check reclaim confirmation overlay (屏幕坐标)
 		if reclaim_confirm_open:
@@ -1491,7 +1493,7 @@ func _cloud_save():
 	var cb := func(result: int, response_code: int, _headers: PackedStringArray, _body: PackedByteArray):
 		_save_pending = false
 		if result == HTTPRequest.RESULT_SUCCESS and response_code == 200:
-			pass  # 静默成功
+			pass # 静默成功
 	if _http_cb.is_valid() and http.request_completed.is_connected(_http_cb):
 		http.request_completed.disconnect(_http_cb)
 	_http_cb = cb
@@ -1582,7 +1584,7 @@ func _cloud_load():
 	var headers := ["Authorization: Bearer " + auth_token]
 	var cb := func(result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray):
 		if result != HTTPRequest.RESULT_SUCCESS or response_code != 200:
-			return  # 云端失败，保留本地数据
+			return # 云端失败，保留本地数据
 		var parsed = JSON.parse_string(body.get_string_from_utf8())
 		if not (parsed is Dictionary):
 			return
@@ -1727,7 +1729,7 @@ func _apply_offline_growth(saved_at: int):
 				# 离线生长（含减速：按当前状态估算平均减速）
 				var speed_mult := 1.0
 				if int(cell.get("water_state", 0)) == 1:
-					speed_mult *= 0.85  # 离线用平均减速
+					speed_mult *= 0.85 # 离线用平均减速
 				var bc := int(cell.get("bug_count", 0))
 				if bc > 0:
 					speed_mult *= maxf(1.0 - bc * 0.10, 0.5)
@@ -1749,7 +1751,7 @@ func _apply_offline_growth(saved_at: int):
 					var max_bugs: int = int(CROPS[cid][12])
 					if int(cell.get("bug_count", 0)) < max_bugs and _game_time >= float(cell.get("bug_protect_until", 0.0)):
 						var bug_rate: float = float(CROPS[cid][10])
-						var new_bugs := int(bug_rate * elapsed_hours * sm * 10.0)  # 期望虫数
+						var new_bugs := int(bug_rate * elapsed_hours * sm * 10.0) # 期望虫数
 						if new_bugs > 0:
 							cell["bug_count"] = clampi(int(cell.get("bug_count", 0)) + new_bugs, 0, max_bugs)
 							if cell.get("bug_since", 0.0) == 0.0:
@@ -1923,7 +1925,7 @@ func _draw_world():
 					var ws: int = int(cell.get("water_state", 0))
 					var bc: int = int(cell.get("bug_count", 0))
 					var wc: int = int(cell.get("weed_count", 0))
-					if ws == 1:  # DRY
+					if ws == 1: # DRY
 						_d_circle(Vector2(icon_x, icon_y), 6, Color(0.2, 0.5, 0.9, 0.8))
 						_draw_text(icon_x - 3, icon_y + 3, "渴", 8, Color(1, 1, 1))
 						icon_x -= 16
@@ -2069,13 +2071,13 @@ func _draw_ui(caller: CanvasItem):
 	var tb_colors := [
 		Color(0.5, 0.47, 0.42), Color(0.22, 0.52, 0.88), Color(0.78, 0.58, 0.12),
 		Color(0.22, 0.72, 0.32), Color(0.64, 0.38, 0.22), Color(0.64, 0.38, 0.22),
-		Color(0.75, 0.22, 0.22),  Color(0.22, 0.72, 0.32), Color(0.78, 0.58, 0.12),
+		Color(0.75, 0.22, 0.22), Color(0.22, 0.72, 0.32), Color(0.78, 0.58, 0.12),
 		Color(0.4, 0.42, 0.5),
 	]
 	var tb_dark := [
 		Color(0.35, 0.32, 0.28), Color(0.14, 0.38, 0.68), Color(0.58, 0.4, 0.06),
 		Color(0.14, 0.52, 0.2), Color(0.42, 0.24, 0.14), Color(0.42, 0.24, 0.14),
-		Color(0.52, 0.14, 0.14),  Color(0.14, 0.52, 0.2), Color(0.58, 0.4, 0.06),
+		Color(0.52, 0.14, 0.14), Color(0.14, 0.52, 0.2), Color(0.58, 0.4, 0.06),
 		Color(0.28, 0.3, 0.36),
 	]
 	var btn_size: float = 58.0
@@ -2083,6 +2085,22 @@ func _draw_ui(caller: CanvasItem):
 	var tb_total: float = 10.0 * btn_size + 9.0 * btn_gap
 	var tb_start_x: float = vp.x * 0.5 - tb_total * 0.5
 	var tb_y: float = vp.y * 0.8
+
+	if TOOLBAR_BG_TEXTURE != null:
+		var bg_w: float = tb_total + 140.0
+		var bg_h: float = btn_size + 80.0
+		var bg_rect := Rect2(tb_start_x - 70.0, tb_y - 30.0, bg_w, bg_h)
+		
+		var tex_size := TOOLBAR_BG_TEXTURE.get_size()
+		var left_m := 80.0
+		var right_m := 80.0
+		var scale_y := bg_h / maxf(tex_size.y, 1.0)
+		var draw_l := left_m * scale_y
+		var draw_r := right_m * scale_y
+		
+		_ui_draw_target.draw_texture_rect_region(TOOLBAR_BG_TEXTURE, Rect2(bg_rect.position.x, bg_rect.position.y, draw_l, bg_h), Rect2(0, 0, left_m, tex_size.y))
+		_ui_draw_target.draw_texture_rect_region(TOOLBAR_BG_TEXTURE, Rect2(bg_rect.position.x + draw_l, bg_rect.position.y, bg_rect.size.x - draw_l - draw_r, bg_h), Rect2(left_m, 0, tex_size.x - left_m - right_m, tex_size.y))
+		_ui_draw_target.draw_texture_rect_region(TOOLBAR_BG_TEXTURE, Rect2(bg_rect.position.x + bg_rect.size.x - draw_r, bg_rect.position.y, draw_r, bg_h), Rect2(tex_size.x - right_m, 0, right_m, tex_size.y))
 
 	for ti in range(10):
 		var bx: float = tb_start_x + ti * (btn_size + btn_gap)
