@@ -24,18 +24,24 @@ MCPRuntimeProbe="*res://addons/godot_mcp/runtime/mcp_runtime_probe.gd"
 
 window/size/viewport_width=1280
 window/size/viewport_height=720
+window/size/window_width_override=1448
+window/size/window_height_override=1086
 window/stretch/mode="canvas_items"
 window/stretch/aspect="keep_height"
 window/size/min_window_width=960
 window/size/min_window_height=540
 
-[input_devices]
-
-pointing/emulate_mouse_from_touch=false
-
 [editor_plugins]
 
 enabled=PackedStringArray("res://addons/godot_mcp/plugin.cfg")
+
+[gui]
+
+theme/default_font="res://assets/fonts/simhei.ttf"
+
+[input_devices]
+
+pointing/emulate_mouse_from_touch=false
 
 [physics]
 

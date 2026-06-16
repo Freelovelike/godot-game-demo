@@ -107,6 +107,8 @@ var _touch_cam_start := Vector2.ZERO
 # UI 绘制目标（CanvasLayer 子节点，画在屏幕坐标系）
 var _ui_draw_target: CanvasItem = null
 var _ui_overlay: Control = null
+# 中文字体
+var _cn_font: Font = null
 
 # 肥料系统
 # [名称, 金币价, 类型, 效果值, 可用阶段列表, 每株上限, max_minutes_limit]
@@ -125,6 +127,10 @@ var selected_fertilizer = -1    # FERTILIZERS数组下标，-1=未选择
 var shop_tab := 0               # 0=种子, 1=肥料
 
 func _ready():
+	# 加载中文字体
+	var font_path := "res://assets/fonts/simhei.ttf"
+	if ResourceLoader.exists(font_path):
+		_cn_font = load(font_path) as Font
 	# Read auth data from login scene
 	if get_tree().has_meta("auth_token"):
 		auth_token = str(get_tree().get_meta("auth_token"))
@@ -1820,7 +1826,7 @@ func _draw_world():
 					_draw_sign(cx, cy, sign_color, sign_label, can)
 				else:
 					var lock_text := "Lv" + str(req_level)
-					var f_lock: Font = ThemeDB.fallback_font
+					var f_lock: Font = _cn_font if _cn_font != null else ThemeDB.fallback_font
 					var lock_w: float = f_lock.get_string_size(lock_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x
 					_d_rect(Rect2(cx - lock_w * 0.5 - 6, cy - 10, lock_w + 12, 18), Color(0.02, 0.02, 0.02, 0.68))
 					_draw_text(cx - lock_w * 0.5, cy - 8, lock_text, 12, Color(0.92, 0.9, 0.78, 0.95))
@@ -1852,7 +1858,7 @@ func _draw_world():
 					if atlas_texture == null:
 						_draw_plant_full(cx, cy, leaf_col, fruit_col)
 					# Harvest label
-					var f: Font = ThemeDB.fallback_font
+					var f: Font = _cn_font if _cn_font != null else ThemeDB.fallback_font
 					var lbl := "收获"
 					var lw: float = f.get_string_size(lbl, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
 					_d_rect(Rect2(cx - lw * 0.5 - 4, cy - TH * 0.5 - 22, lw + 8, 16), Color(0.8, 0.6, 0, 0.85))
@@ -2070,7 +2076,7 @@ func _draw_ui(caller: CanvasItem):
 				_d_circle(Vector2(icon_cx, by + btn_size * 0.48), 30.0, Color(1.0, 0.96, 0.42, 0.10))
 			_d_texture_rect(icon_texture, icon_rect, false)
 			var txt_col: Color = Color(1.0, 0.92, 0.34, 0.98) if is_active else Color(0.78, 0.78, 0.78)
-			var label_w: float = ThemeDB.fallback_font.get_string_size(tb_names[ti], HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x
+			var label_w: float = (_cn_font if _cn_font != null else ThemeDB.fallback_font).get_string_size(tb_names[ti], HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x
 			_draw_text(icon_cx - label_w * 0.5, by + btn_size + 1.0, tb_names[ti], 12, txt_col)
 			if is_active:
 				_d_line(Vector2(icon_cx - 15.0, by + btn_size + 17.0), Vector2(icon_cx + 15.0, by + btn_size + 17.0), Color(1.0, 0.86, 0.22, 0.95), 3.0)
@@ -2195,7 +2201,7 @@ func _draw_ui(caller: CanvasItem):
 		_d_rect(Rect2(bx + 3, by + 2, tb_btn_w - 6, 3), Color(1, 1, 1, 0.25))
 		# Label centered
 		var lbl: String = btn_info["label"]
-		var lbl_w: float = ThemeDB.fallback_font.get_string_size(lbl, HORIZONTAL_ALIGNMENT_LEFT, -1, 18).x
+		var lbl_w: float = (_cn_font if _cn_font != null else ThemeDB.fallback_font).get_string_size(lbl, HORIZONTAL_ALIGNMENT_LEFT, -1, 18).x
 		_draw_text(bx + (tb_btn_w - lbl_w) / 2, by + 12, lbl, 18, Color(1, 1, 1))
 
 	if reset_confirm_open:
@@ -2203,7 +2209,7 @@ func _draw_ui(caller: CanvasItem):
 
 	if toast_text != "":
 		var alpha := minf(toast_timer, 1.0)
-		var f: Font = ThemeDB.fallback_font
+		var f: Font = _cn_font if _cn_font != null else ThemeDB.fallback_font
 		var tw: float = f.get_string_size(toast_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 20).x + 50
 		var tx: float = (vp.x - tw) * 0.5
 		_d_rect(Rect2(tx, vp.y - 50, tw, 38), Color(0, 0, 0, 0.8 * alpha))
@@ -2359,7 +2365,7 @@ func _draw_sign(cx: float, cy: float, sign_color: Color, label: String, can_open
 	var draw_pos := Vector2(board_cx - draw_size.x * 0.5, board_top + (board_h - draw_size.y) * 0.5)
 	_d_texture_rect(_sign_texture, Rect2(draw_pos, draw_size), false)
 	# 文字在牌子内部
-	var f: Font = ThemeDB.fallback_font
+	var f: Font = _cn_font if _cn_font != null else ThemeDB.fallback_font
 	var text_color: Color = Color(0.12, 0.32, 0.12) if can_open else Color(0.78, 0.12, 0.1)
 	var text_size: int = 14
 	var lw: float = f.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, text_size).x
@@ -2642,7 +2648,7 @@ func _draw_seed_preview_texture(cx: float, cy: float, texture: Texture2D):
 
 # ---- Text helper ----
 func _draw_text(x: float, y: float, text: String, size: int, color: Color):
-	var font: Font = ThemeDB.fallback_font
+	var font: Font = _cn_font if _cn_font != null else ThemeDB.fallback_font
 	var t: CanvasItem = _ui_draw_target if _ui_draw_target != null else self
 	t.draw_string(font, Vector2(x, y + float(size) * 0.8), text, HORIZONTAL_ALIGNMENT_LEFT, -1, size, color)
 

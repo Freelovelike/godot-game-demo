@@ -1,5 +1,6 @@
 extends Control
 
+var _cn_font: Font = null
 signal logout_requested
 signal reset_requested
 signal closed
@@ -16,6 +17,8 @@ func _ready():
 	anchor_bottom = 1.0
 	grow_horizontal = Control.GROW_DIRECTION_BOTH
 	grow_vertical = Control.GROW_DIRECTION_BOTH
+	if ResourceLoader.exists("res://assets/fonts/simhei.ttf"):
+		_cn_font = load("res://assets/fonts/simhei.ttf") as Font
 
 func _input(event: InputEvent):
 	if not visible: return
@@ -56,5 +59,5 @@ func _draw():
 		_draw_text(bx + 8, sy + 240, "当前账号: " + un, 13, Color(0.55, 0.55, 0.5))
 
 func _draw_text(x: float, y: float, text: String, sz: int, color: Color):
-	var font: Font = ThemeDB.fallback_font
+	var font: Font = (_cn_font if _cn_font != null else ThemeDB.fallback_font)
 	draw_string(font, Vector2(x, y + float(sz) * 0.8), text, HORIZONTAL_ALIGNMENT_LEFT, -1, sz, color)

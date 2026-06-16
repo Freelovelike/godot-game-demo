@@ -1,5 +1,6 @@
 extends Control
 
+var _cn_font: Font = null
 var CROPS: Array = []
 var CROP_COLORS: Array = []
 var FERTILIZERS: Array = []
@@ -25,6 +26,8 @@ func _ready():
 	anchor_bottom = 1.0
 	grow_horizontal = Control.GROW_DIRECTION_BOTH
 	grow_vertical = Control.GROW_DIRECTION_BOTH
+	if ResourceLoader.exists("res://assets/fonts/simhei.ttf"):
+		_cn_font = load("res://assets/fonts/simhei.ttf") as Font
 
 func _draw():
 	var pw := 980.0; var ph := 720.0
@@ -154,5 +157,5 @@ func _handle_fert(mx: float, my: float, px: float, py: float):
 	elif mx >= px + 828 and mx <= px + 898: fertilizer_selected.emit(fi)
 
 func _draw_text(x: float, y: float, text: String, sz: int, color: Color):
-	var font: Font = ThemeDB.fallback_font
+	var font: Font = _cn_font if _cn_font != null else ThemeDB.fallback_font
 	draw_string(font, Vector2(x, y + float(sz) * 0.8), text, HORIZONTAL_ALIGNMENT_LEFT, -1, sz, color)
