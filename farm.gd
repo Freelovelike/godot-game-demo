@@ -496,7 +496,7 @@ func _get_plot_position(c: int, r: int) -> Vector2:
 	if anchors != null:
 		var plot := anchors.get_node_or_null("Plot_%d_%d" % [r, c])
 		if plot is Node2D:
-			return (plot as Node2D).global_position
+			return anchors.position + (plot as Node2D).position
 	return iso2screen(c, r)
 
 func _create_empty_cell(col: int, row: int) -> Dictionary:
@@ -789,12 +789,12 @@ func _input(event: InputEvent):
 	if event is InputEventMouseButton and (event.button_index == MOUSE_BUTTON_MIDDLE or event.button_index == MOUSE_BUTTON_RIGHT):
 		_cam_dragging = event.pressed
 		if _cam_dragging:
-			_cam_drag_start = event.global_position
+			_cam_drag_start = event.position
 			_cam_start_pos = cam.position
 		return
 
 	if event is InputEventMouseMotion and _cam_dragging:
-		var mouse_pos: Vector2 = event.global_position
+		var mouse_pos: Vector2 = event.position
 		var delta_screen: Vector2 = _cam_drag_start - mouse_pos
 		var delta_world: Vector2 = delta_screen / cam.zoom
 		cam.position = _cam_start_pos + delta_world
@@ -807,7 +807,7 @@ func _input(event: InputEvent):
 	if event is InputEventMouseButton and event.pressed:
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP or event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
 			var vp: Vector2 = get_viewport().get_visible_rect().size
-			var mouse_pos: Vector2 = event.global_position
+			var mouse_pos: Vector2 = event.position
 			var old_zoom := cam.zoom.x
 			if event.button_index == MOUSE_BUTTON_WHEEL_UP:
 				cam.zoom *= 1.1
@@ -836,7 +836,7 @@ func _input(event: InputEvent):
 
 	# --- Mouse motion ---
 	if event is InputEventMouseMotion:
-		var mouse_pos: Vector2 = event.global_position
+		var mouse_pos: Vector2 = event.position
 		_debug_last_input_raw = event.position
 		_debug_last_input_viewport = mouse_pos
 		# 地块 hover 用世界坐标
@@ -869,7 +869,7 @@ func _input(event: InputEvent):
 
 	# --- Mouse button down ---
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
-		var mouse_pos: Vector2 = event.global_position
+		var mouse_pos: Vector2 = event.position
 		var mx: float = mouse_pos.x
 		var my: float = mouse_pos.y
 		# 地块点击用世界坐标
@@ -1465,7 +1465,7 @@ func _save_game(show_toast := true):
 		"fertilizer_inventory": fertilizer_inventory,
 		"selected_fertilizer": selected_fertilizer,
 		"game_time": _game_time,
-		"saved_at": Time.get_unix_time_from_system(),
+		"saved_at": int(Time.get_unix_time_from_system()),
 	}
 	var file := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
 	if file == null:
@@ -1535,7 +1535,7 @@ func _build_save_payload() -> Dictionary:
 		"game_time": _game_time,
 		"selected_seed": selected_seed,
 		"tool_mode": tool_mode,
-		"saved_at": Time.get_unix_time_from_system(),
+		"saved_at": int(Time.get_unix_time_from_system()),
 		"plots": plots,
 		"inventory": _stringify_int_keys(inventory),
 		"fertilizer_inventory": _stringify_int_keys(fertilizer_inventory),
@@ -2199,6 +2199,12 @@ func _draw_ui(caller: CanvasItem):
 	var unlocked_count := _get_unlocked_plot_count()
 	_draw_text(150, 32, "地:" + str(unlocked_count) + "/30", 10, Color(0.7, 0.65, 0.5))
 
+	if reclaim_confirm_open:
+		_draw_reclaim_confirm()
+
+	if shovel_all_confirm_open:
+		_draw_shovel_all_confirm()
+
 	if reset_confirm_open:
 		_draw_reset_confirm()
 
@@ -2239,9 +2245,11 @@ func _draw_input_debug_overlay(vp: Vector2):
 	if _debug_last_tile_hit.x >= 0 and _debug_last_tile_hit.y >= 0:
 		var sp := _get_plot_position(_debug_last_tile_hit.x, _debug_last_tile_hit.y)
 		var corners := iso_visual_corners(sp.x, sp.y)
+		# 世界坐标 → 屏幕坐标（CanvasLayer 绘制在屏幕坐标系）
+		var ct := get_viewport().get_canvas_transform()
 		for i in range(corners.size()):
-			var a: Vector2 = corners[i]
-			var b: Vector2 = corners[(i + 1) % corners.size()]
+			var a: Vector2 = ct * corners[i]
+			var b: Vector2 = ct * corners[(i + 1) % corners.size()]
 			_d_line(a, b, Color(0.2, 1.0, 0.2, 0.95), 3.0)
 
 func _draw_reclaim_confirm():

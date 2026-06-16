@@ -154,6 +154,7 @@ func _build_ui() -> void:
 	password_input = LineEdit.new()
 	password_input.placeholder_text = "输入密码 (至少6位)"
 	password_input.secret = true
+	password_input.secret_character = "*"  # simhei.ttf 没有默认的 • 字符，改用 * 避免乱码
 	password_input.max_length = 64
 	_apply_cn_font(password_input)
 	vbox.add_child(password_input)
