@@ -3,6 +3,7 @@ extends Control
 ## UI overlay — draws HUD / toolbar / toast in screen space, unaffected by Camera2D.
 
 var farm_ref: Node = null
+var _cn_font: Font = null
 
 const TOP_BUTTONS := ["商店", "背包", "设置"]
 const TOP_BUTTON_COLORS := [
@@ -18,6 +19,8 @@ const TOP_BUTTON_DARK_COLORS := [
 
 func _ready():
 	mouse_filter = Control.MOUSE_FILTER_PASS
+	if ResourceLoader.exists("res://assets/fonts/simhei.ttf"):
+		_cn_font = load("res://assets/fonts/simhei.ttf") as Font
 	_build_top_toolbar()
 
 func _build_top_toolbar():
@@ -42,6 +45,8 @@ func _build_top_toolbar():
 		button.focus_mode = Control.FOCUS_NONE
 		button.mouse_filter = Control.MOUSE_FILTER_STOP
 		button.add_theme_font_size_override("font_size", 18)
+		if _cn_font != null:
+			button.add_theme_font_override("font", _cn_font)
 		button.add_theme_color_override("font_color", Color.WHITE)
 		button.add_theme_color_override("font_hover_color", Color.WHITE)
 		button.add_theme_color_override("font_pressed_color", Color(1, 0.92, 0.75))

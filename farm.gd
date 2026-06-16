@@ -723,15 +723,10 @@ func _apply_tool_cursor():
 	if cached == null:
 		Input.set_custom_mouse_cursor(null)
 		return
-	var texture := TOOL_ICON_TEXTURES[tool_mode]
-	var size := texture.get_size() if texture != null else Vector2(0, 0)
-	var longest_side := maxf(size.x, size.y)
-	var hotspot := Vector2(8, 8) if tool_mode == 0 else Vector2(18, 18)
-	if size.x > 0.0 and size.y > 0.0 and longest_side > TOOL_CURSOR_MAX_SIZE:
-		hotspot *= TOOL_CURSOR_MAX_SIZE / maxf(size.x, size.y)
+	var hotspot := cached.get_size() * 0.5
 	Input.set_custom_mouse_cursor(cached, Input.CURSOR_ARROW, hotspot)
 
-func _unhandled_input(event: InputEvent):
+func _input(event: InputEvent):
 	if event is InputEventKey and event.pressed:
 		if event.keycode == KEY_S:
 			_save_game()
@@ -794,12 +789,12 @@ func _unhandled_input(event: InputEvent):
 	if event is InputEventMouseButton and (event.button_index == MOUSE_BUTTON_MIDDLE or event.button_index == MOUSE_BUTTON_RIGHT):
 		_cam_dragging = event.pressed
 		if _cam_dragging:
-			_cam_drag_start = _window_to_viewport_pos(event.position)
+			_cam_drag_start = event.global_position
 			_cam_start_pos = cam.position
 		return
 
 	if event is InputEventMouseMotion and _cam_dragging:
-		var mouse_pos := _window_to_viewport_pos(event.position)
+		var mouse_pos: Vector2 = event.global_position
 		var delta_screen: Vector2 = _cam_drag_start - mouse_pos
 		var delta_world: Vector2 = delta_screen / cam.zoom
 		cam.position = _cam_start_pos + delta_world
@@ -812,7 +807,7 @@ func _unhandled_input(event: InputEvent):
 	if event is InputEventMouseButton and event.pressed:
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP or event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
 			var vp: Vector2 = get_viewport().get_visible_rect().size
-			var mouse_pos := _window_to_viewport_pos(event.position)
+			var mouse_pos: Vector2 = event.global_position
 			var old_zoom := cam.zoom.x
 			if event.button_index == MOUSE_BUTTON_WHEEL_UP:
 				cam.zoom *= 1.1
@@ -841,7 +836,7 @@ func _unhandled_input(event: InputEvent):
 
 	# --- Mouse motion ---
 	if event is InputEventMouseMotion:
-		var mouse_pos := _window_to_viewport_pos(event.position)
+		var mouse_pos: Vector2 = event.global_position
 		_debug_last_input_raw = event.position
 		_debug_last_input_viewport = mouse_pos
 		# 地块 hover 用世界坐标
@@ -851,15 +846,18 @@ func _unhandled_input(event: InputEvent):
 		var wy: float = wp.y
 		hover_col = -1
 		hover_row = -1
+		var best_dist_h := INF
 		for row in range(ROWS):
 			for col in range(COLS):
+				if farm.is_empty() or row >= farm.size() or col >= farm[row].size():
+					continue
 				var sp := _get_plot_position(col, row)
 				if in_diamond(wx, wy, sp.x, sp.y):
-					hover_col = col
-					hover_row = row
-					break
-			if hover_col >= 0:
-				break
+					var d: float = (Vector2(wx, wy) - sp).length_squared()
+					if d < best_dist_h:
+						best_dist_h = d
+						hover_col = col
+						hover_row = row
 		# Drag action: if mouse held and moved to a NEW tile, do action
 		if mouse_held and hover_col >= 0 and not shop_open and not inventory_open and not reclaim_confirm_open and not reset_confirm_open and not settings_open and not warehouse_open and not shovel_all_confirm_open:
 			if hover_col != last_action_col or hover_row != last_action_row:
@@ -871,7 +869,7 @@ func _unhandled_input(event: InputEvent):
 
 	# --- Mouse button down ---
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
-		var mouse_pos := _window_to_viewport_pos(event.position)
+		var mouse_pos: Vector2 = event.global_position
 		var mx: float = mouse_pos.x
 		var my: float = mouse_pos.y
 		# 地块点击用世界坐标
@@ -944,25 +942,36 @@ func _unhandled_input(event: InputEvent):
 				return
 			return
 
-		# Check grid tiles (世界坐标)
+		# Check grid tiles (世界坐标) — 找最近的匹配地块
+		var best_col := -1
+		var best_row := -1
+		var best_dist := INF
 		for row in range(ROWS):
 			for col in range(COLS):
+				if farm.is_empty() or row >= farm.size() or col >= farm[row].size():
+					continue
 				var sp := _get_plot_position(col, row)
 				if in_diamond(wx, wy, sp.x, sp.y):
-					_debug_last_tile_hit = Vector2i(col, row)
-					mouse_held = true
-					_do_tile_action(col, row)
-					last_action_col = col
-					last_action_row = row
-					queue_redraw()
-					return
+					var d: float = (Vector2(wx, wy) - sp).length_squared()
+					if d < best_dist:
+						best_dist = d
+						best_col = col
+						best_row = row
+		if best_col >= 0:
+			_debug_last_tile_hit = Vector2i(best_col, best_row)
+			mouse_held = true
+			_do_tile_action(best_col, best_row)
+			last_action_col = best_col
+			last_action_row = best_row
+			queue_redraw()
+			return
 
 		# Tool mode buttons (屏幕坐标)
 		var tb_btn_s: float = 58.0
 		var tb_btn_g: float = 8.0
 		var tb_total2: float = 10.0 * tb_btn_s + 9.0 * tb_btn_g
 		var tb_sx: float = vp.x * 0.5 - tb_total2 * 0.5
-		var tb_y2: float = vp.y - 78.0
+		var tb_y2: float = vp.y * 0.8
 		if my >= tb_y2 and my <= tb_y2 + 78:
 			for ti in range(10):
 				var bx2: float = tb_sx + ti * (tb_btn_s + tb_btn_g)
@@ -1072,26 +1081,36 @@ func _handle_click(screen_pos: Vector2):
 		fake.button_index = MOUSE_BUTTON_LEFT
 		fake.pressed = true
 		fake.position = screen_pos
-		_unhandled_input(fake)
+		fake.global_position = screen_pos
+		_input(fake)
 		return
 	var wp := _viewport_to_world(viewport_pos)
-	# 地块点击（世界坐标）
+	# 地块点击（世界坐标）— 找最近的匹配地块
+	var best_col := -1
+	var best_row := -1
+	var best_dist := INF
 	for row in range(ROWS):
 		for col in range(COLS):
 			if farm.is_empty() or row >= farm.size() or col >= farm[row].size():
 				continue
 			var sp := _get_plot_position(col, row)
 			if in_diamond(wp.x, wp.y, sp.x, sp.y):
-				_debug_last_tile_hit = Vector2i(col, row)
-				_do_tile_action(col, row)
-				queue_redraw()
-				return
+				var d: float = (Vector2(wp.x, wp.y) - sp).length_squared()
+				if d < best_dist:
+					best_dist = d
+					best_col = col
+					best_row = row
+	if best_col >= 0:
+		_debug_last_tile_hit = Vector2i(best_col, best_row)
+		_do_tile_action(best_col, best_row)
+		queue_redraw()
+		return
 	# 工具栏按钮（屏幕坐标）
 	var tb_btn_s: float = 58.0
 	var tb_btn_g: float = 8.0
 	var tb_total: float = 10.0 * tb_btn_s + 9.0 * tb_btn_g
 	var tb_sx: float = vp.x * 0.5 - tb_total * 0.5
-	var tb_y: float = vp.y - 78.0
+	var tb_y: float = vp.y * 0.8
 	if my >= tb_y and my <= tb_y + 78:
 		for ti in range(10):
 			var bx: float = tb_sx + ti * (tb_btn_s + tb_btn_g)
@@ -2063,7 +2082,7 @@ func _draw_ui(caller: CanvasItem):
 	var btn_gap: float = 8.0
 	var tb_total: float = 10.0 * btn_size + 9.0 * btn_gap
 	var tb_start_x: float = vp.x * 0.5 - tb_total * 0.5
-	var tb_y: float = vp.y - 78.0
+	var tb_y: float = vp.y * 0.8
 
 	for ti in range(10):
 		var bx: float = tb_start_x + ti * (btn_size + btn_gap)
@@ -2199,25 +2218,21 @@ func _draw_input_debug_overlay(vp: Vector2):
 	var marker := _debug_last_input_viewport
 	if marker == Vector2.ZERO and _debug_last_input_raw == Vector2.ZERO:
 		return
-	_d_line(marker + Vector2(-14, 0), marker + Vector2(14, 0), Color(1.0, 0.2, 0.2, 0.95), 2.0)
-	_d_line(marker + Vector2(0, -14), marker + Vector2(0, 14), Color(1.0, 0.2, 0.2, 0.95), 2.0)
-	_d_circle(marker, 4.0, Color(1.0, 1.0, 0.2, 0.95))
 
 	var debug_x := 18.0
-	var debug_y := vp.y - 118.0
-	_d_rect(Rect2(debug_x, debug_y, 310, 96), Color(0.04, 0.04, 0.04, 0.82))
-	_draw_text(debug_x + 10, debug_y + 8, "raw=" + str(_debug_last_input_raw), 12, Color(1, 1, 1))
-	_draw_text(debug_x + 10, debug_y + 26, "vp=" + str(_debug_last_input_viewport), 12, Color(1, 1, 1))
-	_draw_text(debug_x + 10, debug_y + 44, "world=" + str(_debug_last_input_world), 12, Color(1, 1, 1))
-	_draw_text(debug_x + 10, debug_y + 62, "tool=" + str(_debug_last_toolbar_hit), 12, Color(1, 0.9, 0.3))
-	_draw_text(debug_x + 10, debug_y + 80, "tile=" + str(_debug_last_tile_hit), 12, Color(0.5, 1.0, 0.5))
+	var debug_y := vp.y - 78.0
+	_d_rect(Rect2(debug_x, debug_y, 200, 64), Color(0.04, 0.04, 0.04, 0.7))
+	_draw_text(debug_x + 6, debug_y + 6, "vp=" + str(_debug_last_input_viewport), 9, Color(1, 1, 1))
+	_draw_text(debug_x + 6, debug_y + 20, "world=" + str(_debug_last_input_world), 9, Color(1, 1, 1))
+	_draw_text(debug_x + 6, debug_y + 34, "tool=" + str(_debug_last_toolbar_hit), 9, Color(1, 0.9, 0.3))
+	_draw_text(debug_x + 6, debug_y + 48, "tile=" + str(_debug_last_tile_hit), 9, Color(0.5, 1.0, 0.5))
 
 	if _debug_last_toolbar_hit >= 0:
 		var btn_size: float = 58.0
 		var btn_gap: float = 8.0
 		var tb_total: float = 10.0 * btn_size + 9.0 * btn_gap
 		var tb_start_x: float = vp.x * 0.5 - tb_total * 0.5
-		var tb_y: float = vp.y - 78.0
+		var tb_y: float = vp.y * 0.8
 		var bx: float = tb_start_x + _debug_last_toolbar_hit * (btn_size + btn_gap)
 		_d_rect(Rect2(bx, tb_y, btn_size, btn_size), Color(1.0, 0.25, 0.25, 0.0), false, 3.0)
 
