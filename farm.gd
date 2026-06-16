@@ -9,7 +9,7 @@ const TOOL_ICON_TEXTURES: Array[Texture2D] = [
 	preload("res://assets/ui/icons/tool_shovel.png"),
 	preload("res://assets/ui/icons/tool_shovel_all.png"),
 	preload("res://assets/ui/icons/tool_pest.png"),
-	preload("res://assets/ui/icons/tool_fertilizer.png"),
+	preload("res://assets/ui/icons/tool_weed.png"),
 	preload("res://assets/ui/icons/btn_harvest_all.png"),
 	preload("res://assets/ui/icons/btn_warehouse.png"),
 ]
