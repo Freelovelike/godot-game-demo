@@ -961,7 +961,7 @@ func _input(event: InputEvent):
 			var ctx_wp := _get_plot_position(ctx_col, ctx_row)
 			var vp_pos = (ctx_wp - cam.position) * cam.zoom + vp * 0.5
 			var menu_w = ctx_menu_items.size() * 50 + 10
-			var menu_rect = Rect2(vp_pos.x - menu_w * 0.5, vp_pos.y - 80, menu_w, 60)
+			var menu_rect = _ctx_menu_rect(vp_pos)
 			if _point_in_rect(Vector2(mx, my), menu_rect):
 				var clicked_idx = int((mx - (menu_rect.position.x + 5)) / 50.0)
 				if clicked_idx >= 0 and clicked_idx < ctx_menu_items.size():
@@ -1072,6 +1072,14 @@ func _do_tile_action(col: int, row: int):
 			warehouse_open = true
 			queue_redraw()
 
+func _ctx_menu_rect(vp_pos: Vector2) -> Rect2:
+	# 菜单放在地块（作物）正下方，箭头朝上指向作物。
+	# vp_pos 为地块中心屏幕坐标；TH*0.5 为地块半高，乘以缩放再留一点间距。
+	var menu_w := ctx_menu_items.size() * 50 + 10
+	var menu_h := 60.0
+	var below_y := vp_pos.y + (TH * 0.5) * cam.zoom.y + 14.0
+	return Rect2(vp_pos.x - menu_w * 0.5, below_y, menu_w, menu_h)
+
 func _open_context_menu(col: int, row: int):
 	if farm.is_empty() or row >= farm.size() or col >= farm[row].size():
 		return
@@ -1097,8 +1105,9 @@ func _open_context_menu(col: int, row: int):
 				"icon": _get_crop_seed_texture(i)
 			})
 	else:
-		var stage = _get_growth_stage(cell.get("progress", 0.0))
-		if stage >= 3:
+		# 成熟以进度为准（与作物上的"收获"标签一致），_get_growth_stage 最高只到 2，
+		# 不能用来判断成熟，否则成熟作物永远显示不出收获按钮。
+		if float(cell.get("progress", 0.0)) >= 1.0:
 			ctx_menu_items.append({"type": "harvest", "icon": TOOL_ICON_TEXTURES[3]})
 		else:
 			if int(cell.get("weed_count", 0)) > 0:
@@ -2355,23 +2364,23 @@ func _draw_ui(caller: CanvasItem):
 
 func _draw_context_menu_overlay(vp: Vector2):
 	if not ctx_menu_open: return
-	
+
 	var wp := _get_plot_position(ctx_col, ctx_row)
 	var vp_pos = (wp - cam.position) * cam.zoom + vp * 0.5
 	var menu_w = ctx_menu_items.size() * 50 + 10
-	var menu_rect = Rect2(vp_pos.x - menu_w * 0.5, vp_pos.y - 80, menu_w, 60)
-	
+	var menu_rect = _ctx_menu_rect(vp_pos)
+
 	# 画胶囊形状的半透明黑底
 	var r = 30.0
 	_d_circle(Vector2(menu_rect.position.x + r, menu_rect.position.y + r), r, Color(0, 0, 0, 0.65))
 	_d_circle(Vector2(menu_rect.position.x + menu_w - r, menu_rect.position.y + r), r, Color(0, 0, 0, 0.65))
 	_d_rect(Rect2(menu_rect.position.x + r, menu_rect.position.y, menu_w - 2 * r, 60), Color(0, 0, 0, 0.65))
-	
-	# 画小箭头指引到地块
+
+	# 画小箭头朝上指向地块（菜单在作物下方）
 	var arrow_pts: PackedVector2Array = PackedVector2Array([
-		Vector2(vp_pos.x - 8, menu_rect.position.y + 60),
-		Vector2(vp_pos.x, menu_rect.position.y + 68),
-		Vector2(vp_pos.x + 8, menu_rect.position.y + 60),
+		Vector2(vp_pos.x - 8, menu_rect.position.y),
+		Vector2(vp_pos.x, menu_rect.position.y - 8),
+		Vector2(vp_pos.x + 8, menu_rect.position.y),
 	])
 	_d_colored_polygon(arrow_pts, Color(0, 0, 0, 0.65))
 	
