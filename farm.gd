@@ -151,7 +151,8 @@ func _ready():
 
 	# HTTP client for cloud sync
 	http = HTTPRequest.new()
-	http.timeout = 10.0
+	http.use_threads = true  # 开启多线程，避免Android端延迟
+	http.timeout = 120.0  # 增加到120秒
 	add_child(http)
 
 	# Camera for pan/zoom
@@ -1234,8 +1235,17 @@ func _send_action(action: String, params: Dictionary = {}):
 
 func _on_action_response(result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray):
 	if result != HTTPRequest.RESULT_SUCCESS:
-		toast_text = "网络错误"
-		toast_timer = 1.5
+		var error_names := {
+			HTTPRequest.RESULT_CANT_CONNECT: "无法连接",
+			HTTPRequest.RESULT_CANT_RESOLVE: "DNS失败",
+			HTTPRequest.RESULT_CONNECTION_ERROR: "连接错误",
+			HTTPRequest.RESULT_TLS_HANDSHAKE_ERROR: "证书错误",
+			HTTPRequest.RESULT_NO_RESPONSE: "无响应",
+			HTTPRequest.RESULT_TIMEOUT: "超时",
+		}
+		toast_text = "网络错误: " + error_names.get(result, str(result))
+		print("[HTTP ERROR] result=", result, " url=", ApiConfig.API_BASE)
+		toast_timer = 2.0
 		return
 	if response_code != 200:
 		var parsed = JSON.parse_string(body.get_string_from_utf8())

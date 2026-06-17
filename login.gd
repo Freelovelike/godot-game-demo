@@ -41,6 +41,7 @@ func _try_auto_login() -> bool:
 		return false
 	# Validate token with server
 	http = HTTPRequest.new()
+	http.use_threads = true  # 开启多线程，避免Android端延迟
 	http.request_completed.connect(_on_validate_completed.bind(token, user_info))
 	add_child(http)
 	var validate_url := ApiConfig.API_BASE + "/profile"
@@ -86,6 +87,7 @@ func _on_validate_completed(result: int, response_code: int, _headers: PackedStr
 	# Token invalid — clear saved auth, show login
 	_clear_auth()
 	http.queue_free()
+	http = null
 	_build_ui()
 
 func _build_ui() -> void:
@@ -95,6 +97,14 @@ func _build_ui() -> void:
 	bg.color = Color(0.16, 0.12, 0.08)
 	bg.position = Vector2.ZERO; bg.size = vp
 	add_child(bg)
+
+	# 调试信息：显示网络状态
+	var debug_label := Label.new()
+	debug_label.position = Vector2(10, 10)
+	debug_label.add_theme_font_size_override("font_size", 12)
+	debug_label.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
+	debug_label.text = "API: " + ApiConfig.API_BASE + "\n平台: " + OS.get_name()
+	add_child(debug_label)
 
 	var pw := 400.0; var ph := 440.0
 	var panel := PanelContainer.new()
@@ -182,8 +192,18 @@ func _build_ui() -> void:
 	status_label.add_theme_font_size_override("font_size", 14)
 	vbox.add_child(status_label)
 
+	# 网络测试按钮
+	var test_btn := Button.new()
+	test_btn.text = "测试网络连接"
+	test_btn.custom_minimum_size = Vector2(0, 30)
+	_apply_cn_font(test_btn)
+	test_btn.pressed.connect(_on_test_network)
+	vbox.add_child(test_btn)
+
 	if http == null:
 		http = HTTPRequest.new()
+		http.use_threads = true  # 开启多线程，避免Android端延迟
+		http.timeout = 120.0  # 增加到120秒
 		http.request_completed.connect(_on_request_completed)
 		add_child(http)
 
@@ -227,9 +247,13 @@ func _on_action_pressed() -> void:
 	var headers := ["Content-Type: application/json"]
 
 	pending_action = "register" if is_register_mode else "login"
+	print("[HTTP] Sending request to: ", url)
 	var err := http.request(url, headers, HTTPClient.METHOD_POST, body)
 	if err != OK:
-		status_label.text = "请求发送失败"
+		var err_names := {OK:"OK", ERR_UNCONFIGURED:"未配置", ERR_INVALID_PARAMETER:"参数错误", ERR_CANT_CONNECT:"无法连接"}
+		var err_msg: String = err_names.get(err, str(err))
+		status_label.text = "请求发送失败: " + err_msg
+		print("[HTTP ERROR] Request failed: ", err)
 		action_button.disabled = false
 
 
@@ -237,7 +261,21 @@ func _on_request_completed(result: int, response_code: int, headers: PackedStrin
 	action_button.disabled = false
 
 	if result != HTTPRequest.RESULT_SUCCESS:
-		status_label.text = "网络错误，请检查后端是否运行"
+		var error_names := {
+			HTTPRequest.RESULT_CHUNKED_BODY_SIZE_MISMATCH: "数据大小不匹配",
+			HTTPRequest.RESULT_CANT_CONNECT: "无法连接服务器",
+			HTTPRequest.RESULT_CANT_RESOLVE: "无法解析域名(DNS失败)",
+			HTTPRequest.RESULT_CONNECTION_ERROR: "连接错误",
+			HTTPRequest.RESULT_TLS_HANDSHAKE_ERROR: "TLS握手失败(证书问题)",
+			HTTPRequest.RESULT_NO_RESPONSE: "服务器无响应",
+			HTTPRequest.RESULT_BODY_SIZE_LIMIT_EXCEEDED: "响应体过大",
+			HTTPRequest.RESULT_REQUEST_FAILED: "请求失败",
+			HTTPRequest.RESULT_REDIRECT_LIMIT_REACHED: "重定向次数超限",
+			HTTPRequest.RESULT_TIMEOUT: "请求超时",
+		}
+		var error_msg: String = error_names.get(result, "未知错误(" + str(result) + ")")
+		status_label.text = "网络错误: " + error_msg
+		print("[HTTP ERROR] result=", result, " url=", ApiConfig.API_BASE)
 		status_label.add_theme_color_override("font_color", Color(1.0, 0.5, 0.4))
 		return
 
@@ -287,3 +325,74 @@ func _save_auth(token: String, user_info: Dictionary) -> void:
 func _clear_auth() -> void:
 	if FileAccess.file_exists(AUTH_FILE):
 		DirAccess.remove_absolute(AUTH_FILE)
+
+func _on_test_network() -> void:
+	status_label.text = "正在测试网络..."
+	status_label.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
+	action_button.disabled = true
+
+	# 创建一个临时的 HTTPRequest 用于测试
+	var test_http := HTTPRequest.new()
+	test_http.use_threads = true  # 开启多线程，避免Android端延迟
+	test_http.timeout = 120.0  # 增加到120秒
+	add_child(test_http)
+	test_http.request_completed.connect(_on_test_completed.bind(test_http))
+
+	# 测试连接 - 直接测试登录端点
+	var url := ApiConfig.API_BASE + "/auth/login"
+	print("[TEST] Testing connection to: ", url)
+	var err := test_http.request(url, ["Content-Type: application/json"], HTTPClient.METHOD_POST, '{"test":true}')
+	if err != OK:
+		status_label.text = "请求创建失败: " + str(err)
+		action_button.disabled = false
+		test_http.queue_free()
+
+func _on_test_completed(result: int, response_code: int, headers: PackedStringArray, body: PackedByteArray, test_http: HTTPRequest) -> void:
+	test_http.queue_free()
+	action_button.disabled = false
+
+	var error_names := {
+		HTTPRequest.RESULT_SUCCESS: "成功",
+		HTTPRequest.RESULT_CHUNKED_BODY_SIZE_MISMATCH: "数据大小不匹配",
+		HTTPRequest.RESULT_CANT_CONNECT: "无法连接服务器",
+		HTTPRequest.RESULT_CANT_RESOLVE: "无法解析域名",
+		HTTPRequest.RESULT_CONNECTION_ERROR: "连接错误",
+		HTTPRequest.RESULT_TLS_HANDSHAKE_ERROR: "TLS握手失败",
+		HTTPRequest.RESULT_NO_RESPONSE: "服务器无响应",
+		HTTPRequest.RESULT_BODY_SIZE_LIMIT_EXCEEDED: "响应体过大",
+		HTTPRequest.RESULT_REQUEST_FAILED: "请求失败",
+		HTTPRequest.RESULT_REDIRECT_LIMIT_REACHED: "重定向次数超限",
+		HTTPRequest.RESULT_TIMEOUT: "请求超时",
+	}
+
+	# 处理未知错误码
+	var error_msg: String
+	if error_names.has(result):
+		error_msg = error_names[result]
+	else:
+		error_msg = "未知错误(代码:" + str(result) + ")"
+
+	# 超时特殊处理
+	if result == HTTPRequest.RESULT_TIMEOUT or result == 13:
+		error_msg = "请求超时"
+
+	if result == HTTPRequest.RESULT_SUCCESS:
+		status_label.text = "网络连接成功! 状态码: " + str(response_code)
+		status_label.add_theme_color_override("font_color", Color(0.4, 1.0, 0.5))
+	else:
+		# 构建详细的错误信息
+		var detail := "错误: " + error_msg
+		if response_code > 0:
+			detail += "\nHTTP状态码: " + str(response_code)
+		detail += "\n可能原因:"
+		if result == 2 or result == 13:
+			detail += "\n- 服务器未运行\n- 端口不对\n- 防火墙阻止"
+		elif result == 3:
+			detail += "\n- 域名无法解析\n- DNS问题"
+		elif result == 5 or result == 12:
+			detail += "\n- SSL证书问题\n- 尝试用HTTP"
+		elif result == 10:
+			detail += "\n- 网络太慢\n- 服务器无响应"
+		status_label.text = detail
+		status_label.add_theme_color_override("font_color", Color(1.0, 0.5, 0.4))
+		print("[TEST FAILED] result=", result, " response_code=", response_code)
