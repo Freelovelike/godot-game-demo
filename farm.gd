@@ -880,6 +880,9 @@ func _input(event: InputEvent):
 
 	# --- Mouse button down ---
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		# overlay 打开时，不处理任何点击（overlay 有自己的 _input 处理）
+		if shop_open or inventory_open or settings_open:
+			return
 		var mouse_pos: Vector2 = event.position
 		var mx: float = mouse_pos.x
 		var my: float = mouse_pos.y
@@ -1171,6 +1174,9 @@ func _handle_click(screen_pos: Vector2):
 	_debug_last_input_world = _viewport_to_world(viewport_pos)
 	_debug_last_toolbar_hit = -1
 	_debug_last_tile_hit = Vector2i(-1, -1)
+	# overlay 打开时，不处理触屏点击（overlay 有自己的 _input 处理）
+	if shop_open or inventory_open or settings_open:
+		return
 	# 确认框（复用鼠标逻辑）
 	if reclaim_confirm_open or shovel_all_confirm_open or warehouse_open or reset_confirm_open:
 		# 模拟左键点击，让已有逻辑处理
@@ -2042,7 +2048,11 @@ func _draw_world():
 						_draw_text(icon_x - 3, icon_y + 3, str(wc), 8, Color(1, 1, 1))
 
 	# ---- HOVER TOOLTIP (QQ Farm style detail card) ----
-	if hover_col >= 0 and hover_col < COLS and hover_row >= 0 and hover_row < ROWS:
+	# 弹窗打开时不显示 tooltip，避免遮挡
+	if (not shop_open and not inventory_open and not settings_open
+			and not reclaim_confirm_open and not reset_confirm_open
+			and not warehouse_open and not shovel_all_confirm_open
+			and hover_col >= 0 and hover_col < COLS and hover_row >= 0 and hover_row < ROWS):
 		var hcell: Dictionary = farm[hover_row][hover_col]
 		if not _is_cell_unlocked(hcell):
 			var hsp_locked := _get_plot_position(hover_col, hover_row)
