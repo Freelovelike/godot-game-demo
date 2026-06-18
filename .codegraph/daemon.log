@@ -143,3 +143,9 @@
 [CodeGraph daemon] Shutting down (idle timeout; clients=0).
 [CodeGraph daemon] Listening on \\.\pipe\codegraph-9ebd62b7951d039e (pid 31512, v0.9.9). Idle timeout 300000ms.
 [CodeGraph MCP] File watcher active — graph will auto-sync on changes
+[CodeGraph] File watcher error {
+  error: "Error: EBUSY: resource busy or locked, watch 'C:\\Users\\null\\Desktop\\hwc\\godot\\godot-game-demo\\project.godot3362700.tmp'"
+}
+[CodeGraph] File watcher error {
+  error: "Error: EBUSY: resource busy or locked, watch 'C:\\Users\\null\\Desktop\\hwc\\godot\\godot-game-demo\\project.godot4700556.tmp'"
+}

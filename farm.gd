@@ -48,7 +48,6 @@ const COLS := 6
 const ROWS := 5
 const OX := 500.0
 const OY := 320.0
-const SAVE_PATH := "user://qq_farm_save.json"
 const PLOT_ANCHORS_PATH := "PlotAnchors"
 const INITIAL_UNLOCKED_PLOTS := 1
 const BASE_RECLAIM_COST := 60
@@ -190,11 +189,7 @@ func _ready():
 	_ui_overlay = get_node_or_null("UILayer/UIOverlay")
 	if _ui_overlay:
 		_ui_overlay.farm_ref = self
-	if auth_token.is_empty():
-		_config_loaded = true
-		_load_game()
-	else:
-		_load_remote_config()
+	_load_remote_config()
 
 func _setup_camera():
 	cam.position = Vector2(500.0, 530.0)
@@ -313,31 +308,12 @@ func _init_overlays():
 		shop.queue_redraw()
 	)
 	shop.crop_sell_requested.connect(func(cid: int, amount: int):
-		if not auth_token.is_empty():
-			_send_sell(cid, amount)
-		else:
-			_sell_inventory_crop(cid, amount)
+		_send_sell(cid, amount)
 		_sync_shop_data(shop)
 		shop.queue_redraw()
 	)
 	shop.fertilizer_buy_requested.connect(func(fi: int):
-		if not auth_token.is_empty():
-			_send_action("buy_fertilizer", {"fert_id": fi})
-		else:
-			# 离线模式：本地扣金币
-			var fert: Array = FERTILIZERS[fi]
-			var cost: int = int(fert[1])
-			if gold >= cost:
-				gold -= cost
-				if not fertilizer_inventory.has(fi):
-					fertilizer_inventory[fi] = 0
-				fertilizer_inventory[fi] = fertilizer_inventory[fi] + 1
-				selected_fertilizer = fi
-				toast_text = "购买 " + str(fert[0]) + " 成功!"
-				toast_timer = 1.5
-			else:
-				toast_text = "金币不足!"
-				toast_timer = 1.5
+		_send_action("buy_fertilizer", {"fert_id": fi})
 		_sync_shop_data(shop)
 		shop.queue_redraw()
 	)
@@ -360,18 +336,12 @@ func _init_overlays():
 		inv.CROPS = CROPS
 		inv.CROP_COLORS = CROP_COLORS
 		inv.sell_requested.connect(func(cid: int, amount: int):
-			if not auth_token.is_empty():
-				_send_sell(cid, amount)
-			else:
-				_sell_inventory_crop(cid, amount)
+			_send_sell(cid, amount)
 			inv.inventory = inventory
 			inv.queue_redraw()
 		)
 		inv.sell_all_requested.connect(func():
-			if not auth_token.is_empty():
-				_send_action("sell_all")
-			else:
-				_sell_all_inventory()
+			_send_action("sell_all")
 			inv.inventory = inventory
 			inv.queue_redraw()
 		)
@@ -1146,37 +1116,9 @@ func _parse_arrayish_json(value) -> Array:
 	return []
 
 func _try_reclaim_plot(col: int, row: int):
+	# 服务端权威：开垦校验与扣费全部由后端处理
 	var pi: int = _get_plot_index(col, row)
-	if not auth_token.is_empty():
-		# 服务端权威：开垦校验与扣费全部由后端处理
-		_send_action("reclaim", {"plot_index": pi})
-		return
-	# 离线模式：本地校验扣费
-	var next_locked := _get_next_locked_plot()
-	if next_locked.x != col or next_locked.y != row:
-		toast_text = "请按顺序先开垦下一块土地"
-		toast_timer = 1.8
-		return
-	var required_level := _get_reclaim_level(col, row)
-	var cost := _get_reclaim_cost(col, row)
-	if level < required_level:
-		toast_text = "等级不足! 这块地需要等级 " + str(required_level)
-		toast_timer = 1.8
-		return
-	if gold < cost:
-		toast_text = "金币不足! 开垦需要 " + str(cost) + " 金币"
-		toast_timer = 1.8
-		return
-	gold -= cost
-	farm[row][col]["unlocked"] = true
-	farm[row][col]["land_level"] = 1
-	farm[row][col]["land_work"] = 0
-	farm[row][col]["crop_id"] = -1
-	farm[row][col]["progress"] = 0.0
-	farm[row][col]["wet_timer"] = 0.0
-	toast_text = "开垦成功! 解锁第 " + str(pi + 1) + " 块地"
-	toast_timer = 2.0
-	_save_game(false)
+	_send_action("reclaim", {"plot_index": pi})
 
 func _open_reclaim_confirm(col: int, row: int):
 	reclaim_confirm_col = col
@@ -1214,79 +1156,6 @@ func _point_in_rect(point: Vector2, rect: Rect2) -> bool:
 	return point.x >= rect.position.x and point.x <= rect.position.x + rect.size.x and point.y >= rect.position.y and point.y <= rect.position.y + rect.size.y
 
 
-func _add_land_work(row: int, col: int, amount: int):
-	var cell: Dictionary = farm[row][col]
-	var land_level := int(cell.get("land_level", 1))
-	if land_level >= LAND_LEVEL_MAX:
-		return
-	var work := int(cell.get("land_work", 0)) + amount
-	if work >= LAND_UPGRADE_WORK_REQUIRED:
-		cell["land_level"] = clampi(land_level + 1, 1, LAND_LEVEL_MAX)
-		cell["land_work"] = 0
-		toast_text = "土地升级! " + _get_land_level_name(land_level) + " -> " + _get_land_level_name(cell["land_level"])
-		toast_timer = 2.0
-	else:
-		cell["land_work"] = work
-
-func _add_to_inventory(cid: int, amount: int):
-	var key_str = str(cid)
-	if not inventory.has(cid):
-		inventory[cid] = 0
-	inventory[cid] += amount
-	toast_text = "获得 " + str(CROPS[cid][0]) + " x" + str(amount) + "，已放入背包"
-	toast_timer = 1.5
-
-func _sell_inventory_crop(cid: int, amount: int) -> int:
-	var have := int(inventory.get(cid, 0))
-	var sell_amount := mini(maxi(amount, 0), have)
-	if sell_amount <= 0:
-		toast_text = "背包里没有 " + str(CROPS[cid][0])
-		toast_timer = 1.5
-		return 0
-	gold += int(CROPS[cid][6]) * sell_amount
-	inventory[cid] = have - sell_amount
-	toast_text = "售出 " + str(CROPS[cid][0]) + " x" + str(sell_amount) + "，获得 " + str(int(CROPS[cid][6]) * sell_amount) + " 金币"
-	toast_timer = 1.5
-	return sell_amount
-
-func _sell_all_inventory():
-	var total_count := 0
-	var total_gold := 0
-	for cid in inventory.keys():
-		var count := int(inventory[cid])
-		if count <= 0:
-			continue
-		total_count += count
-		total_gold += int(CROPS[int(cid)][6]) * count
-		inventory[cid] = 0
-	if total_count <= 0:
-		toast_text = "背包是空的"
-	else:
-		gold += total_gold
-		toast_text = "全部卖出 " + str(total_count) + " 个作物，获得 " + str(total_gold) + " 金币"
-	toast_timer = 1.8
-
-func _handle_inventory_click(mx: float, my: float):
-	var keys = inventory.keys()
-	var item_count = 0
-	for cid in keys:
-			if inventory.has(cid) and inventory[cid] > 0:
-				var col = item_count % 5
-				var row = item_count / 5
-				var slot_x = 200 + col * 150
-				var slot_y = 120 + row * 190
-				
-				# Sell button rect
-				if mx >= slot_x + 18 and mx <= slot_x + 67 and my >= slot_y + 123 and my <= slot_y + 148:
-					_sell_inventory_crop(int(cid), 1)
-					queue_redraw()
-					return
-				if mx >= slot_x + 73 and mx <= slot_x + 122 and my >= slot_y + 123 and my <= slot_y + 148:
-					_sell_inventory_crop(int(cid), int(inventory.get(cid, 0)))
-					queue_redraw()
-					return
-			item_count += 1
-
 func _get_unlocked_plot_count() -> int:
 	var count := 0
 	for r in range(ROWS):
@@ -1303,156 +1172,32 @@ func _get_next_locked_plot() -> Vector2i:
 	return Vector2i(-1, -1)
 
 func _save_game(show_toast := true):
-	var payload := _build_save_payload()
-	var data := {
-		"gold": payload["gold"],
-		"level": payload["level"],
-		"exp_val": payload["exp_val"],
-		"exp_to_level": payload["exp_to_level"],
-		"plots": payload["plots"],
-		"inventory": payload["inventory"],
-		"selected_seed": payload["selected_seed"],
-		"tool_mode": payload["tool_mode"],
-		"fertilizer_inventory": payload["fertilizer_inventory"],
-		"selected_fertilizer": payload["selected_fertilizer"],
-		"game_time": payload["game_time"],
-		"saved_at": int(Time.get_unix_time_from_system()),
-	}
-	var file := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
-	if file == null:
-		if show_toast:
-			toast_text = "保存失败"
-			toast_timer = 1.5
+	# 服务端权威：游戏状态由 /farm/action 改动，这里只回传客户端偏好（选中种子/工具）。
+	if not is_instance_valid(farm_api) or _save_pending:
 		return
-	file.store_string(JSON.stringify(data))
+	_save_pending = true
+	farm_api.request_save(_build_save_payload())
 	if show_toast:
 		toast_text = "农场已保存"
 		toast_timer = 1.2
-	# 云端同步（异步，不阻塞）
-	if not auth_token.is_empty() and not _save_pending:
-		_cloud_save()
 
 func _cloud_save():
-	if not is_instance_valid(farm_api):
-		return
-	_save_pending = true
-	var payload := _build_save_payload()
-	farm_api.request_save(payload)
+	_save_game(false)
 
 func _on_save_response(_result: int, _response_code: int, _headers: PackedStringArray, _body: PackedByteArray):
 	_save_pending = false
 
 func _build_save_payload() -> Dictionary:
-	var plots: Array = []
-	for r in range(ROWS):
-		for c in range(COLS):
-			var cell: Dictionary = farm[r][c]
-			var plot := {
-				"plot_index": r * COLS + c,
-				"unlocked": cell.get("unlocked", false),
-				"land_level": cell.get("land_level", 0),
-				"land_work": cell.get("land_work", 0),
-				"crop_id": cell["crop_id"] if cell["crop_id"] != -1 else null,
-				"progress": cell.get("progress", 0.0),
-				"wet_timer": cell.get("wet_timer", 0.0),
-				"water_state": cell.get("water_state", 0),
-				"dry_timer": cell.get("dry_timer", 0.0),
-				"water_protect_until": cell.get("water_protect_until", 0.0),
-				"bug_count": cell.get("bug_count", 0),
-				"bug_since": cell.get("bug_since", 0.0),
-				"bug_protect_until": cell.get("bug_protect_until", 0.0),
-				"weed_count": cell.get("weed_count", 0),
-				"weed_since": cell.get("weed_since", 0.0),
-				"weed_protect_until": cell.get("weed_protect_until", 0.0),
-				"fert_used": cell.get("fert_used", 0),
-				"fert_stage_used": cell.get("fert_stage_used", {}),
-				"fert_ids_used": cell.get("fert_ids_used", []),
-				"yield_bonus_rate": cell.get("yield_bonus_rate", 0.0),
-				"yield_loss_rate": cell.get("yield_loss_rate", 0.0),
-			}
-			plots.append(plot)
 	return {
-		"gold": gold,
-		"level": level,
-		"exp_val": exp_val,
-		"exp_to_level": exp_to_level,
-		"game_time": _game_time,
 		"selected_seed": selected_seed,
 		"tool_mode": tool_mode,
-		"saved_at": int(Time.get_unix_time_from_system()),
-		"plots": plots,
-		"inventory": _stringify_int_keys(inventory),
-		"fertilizer_inventory": _stringify_int_keys(fertilizer_inventory),
-		"selected_fertilizer": selected_fertilizer,
 	}
-
-func _stringify_int_keys(dict: Dictionary) -> Dictionary:
-	var out := {}
-	for k in dict.keys():
-		out[str(k)] = dict[k]
-	return out
-
-func _legacy_farm_to_plots(saved_farm: Array) -> Array:
-	var plots: Array = []
-	for r in range(mini(ROWS, saved_farm.size())):
-		if not (saved_farm[r] is Array):
-			continue
-		var saved_row: Array = saved_farm[r]
-		for c in range(mini(COLS, saved_row.size())):
-			if not (saved_row[c] is Dictionary):
-				continue
-			var saved_cell: Dictionary = saved_row[c]
-			var cid := int(saved_cell.get("crop_id", -1))
-			var was_unlocked := bool(saved_cell.get("unlocked", cid != -1 or _get_plot_index(c, r) < INITIAL_UNLOCKED_PLOTS))
-			var land_level := int(saved_cell.get("land_level", 1 if was_unlocked else LAND_LEVEL_LOCKED))
-			land_level = clampi(land_level, LAND_LEVEL_LOCKED, LAND_LEVEL_MAX)
-			plots.append({
-				"plot_index": _get_plot_index(c, r),
-				"unlocked": land_level > LAND_LEVEL_LOCKED,
-				"land_level": land_level,
-				"land_work": clampi(int(saved_cell.get("land_work", 0)), 0, LAND_UPGRADE_WORK_REQUIRED - 1),
-				"crop_id": cid if cid >= 0 else null,
-				"progress": clampf(float(saved_cell.get("progress", 0.0)), 0.0, 1.0),
-				"wet_timer": maxf(float(saved_cell.get("wet_timer", 0.0)), 0.0),
-				"water_state": int(saved_cell.get("water_state", 0)),
-				"dry_timer": maxf(float(saved_cell.get("dry_timer", 0.0)), 0.0),
-				"water_protect_until": float(saved_cell.get("water_protect_until", 0.0)),
-				"bug_count": clampi(int(saved_cell.get("bug_count", 0)), 0, 3),
-				"bug_since": float(saved_cell.get("bug_since", 0.0)),
-				"bug_protect_until": float(saved_cell.get("bug_protect_until", 0.0)),
-				"weed_count": clampi(int(saved_cell.get("weed_count", 0)), 0, 3),
-				"weed_since": float(saved_cell.get("weed_since", 0.0)),
-				"weed_protect_until": float(saved_cell.get("weed_protect_until", 0.0)),
-				"fert_used": clampi(int(saved_cell.get("fert_used", 0)), 0, 3),
-				"fert_stage_used": saved_cell.get("fert_stage_used", {}),
-				"fert_ids_used": saved_cell.get("fert_ids_used", []),
-				"yield_bonus_rate": maxf(float(saved_cell.get("yield_bonus_rate", 0.0)), 0.0),
-				"yield_loss_rate": clampf(float(saved_cell.get("yield_loss_rate", 0.0)), 0.0, 0.30),
-			})
-	return plots
 
 func _load_game():
 	if not _config_loaded:
 		return
-	# 服务端权威：登录状态从云端加载，否则本地
-	if not auth_token.is_empty():
-		_cloud_load()
-		return
-	# 纯离线模式：从本地加载
-	if not FileAccess.file_exists(SAVE_PATH):
-		return
-	var file := FileAccess.open(SAVE_PATH, FileAccess.READ)
-	if file == null:
-		return
-	var parsed = JSON.parse_string(file.get_as_text())
-	if not (parsed is Dictionary):
-		return
-	var data: Dictionary = parsed
-	if data.has("farm") and not data.has("plots"):
-		data["plots"] = _legacy_farm_to_plots(data["farm"])
-	if data.has("farm") and (data["farm"] is Array):
-		data.erase("farm")
-	_apply_state(data)
+	# 服务端权威：始终从云端加载
+	_cloud_load()
 
 func _cloud_load():
 	if not is_instance_valid(farm_api):
