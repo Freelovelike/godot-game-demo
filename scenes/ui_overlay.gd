@@ -4,6 +4,31 @@ extends Control
 
 var farm_ref: Node = null
 var _cn_font: Font = null
+var _hud_gold: Label
+var _hud_level: Label
+var _hud_exp: Label
+var _hud_land: Label
+var _toast: Label
+var _tool_buttons: Array[Button] = []
+var _reclaim_modal: Control
+var _reclaim_title: Label
+var _reclaim_level: Label
+var _reclaim_cost: Label
+var _reset_modal: Control
+var _shovel_modal: Control
+
+const TOOL_ICON_TEXTURES: Array[Texture2D] = [
+	null,
+	preload("res://assets/ui/icons/tool_water.png"),
+	preload("res://assets/ui/icons/tool_fertilizer.png"),
+	preload("res://assets/ui/icons/tool_harvest.png"),
+	preload("res://assets/ui/icons/tool_shovel.png"),
+	preload("res://assets/ui/icons/tool_shovel_all.png"),
+	preload("res://assets/ui/icons/tool_pest.png"),
+	preload("res://assets/ui/icons/tool_weed.png"),
+	preload("res://assets/ui/icons/btn_harvest_all.png"),
+	preload("res://assets/ui/icons/btn_warehouse.png"),
+]
 
 const TOP_BUTTONS := ["商店", "背包", "设置"]
 const TOP_BUTTON_COLORS := [
@@ -22,6 +47,10 @@ func _ready():
 	if ResourceLoader.exists("res://assets/fonts/simhei.ttf"):
 		_cn_font = load("res://assets/fonts/simhei.ttf") as Font
 	_build_top_toolbar()
+	_build_hud()
+	_build_tool_toolbar()
+	_build_toast()
+	_build_confirm_modals()
 
 func _build_top_toolbar():
 	var toolbar := HBoxContainer.new()
@@ -56,6 +85,184 @@ func _build_top_toolbar():
 		button.pressed.connect(_on_top_button_pressed.bind(i))
 		toolbar.add_child(button)
 
+func _build_hud():
+	var panel := PanelContainer.new()
+	panel.name = "HUD"
+	panel.anchor_left = 0.0
+	panel.anchor_top = 0.0
+	panel.offset_left = 8.0
+	panel.offset_top = 6.0
+	panel.offset_right = 288.0
+	panel.offset_bottom = 54.0
+	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	panel.add_theme_stylebox_override("panel", _make_panel_style(Color(0.08, 0.06, 0.02, 0.82), Color(0.45, 0.35, 0.15)))
+	add_child(panel)
+	var grid := GridContainer.new()
+	grid.columns = 2
+	grid.add_theme_constant_override("h_separation", 18)
+	grid.add_theme_constant_override("v_separation", 2)
+	panel.add_child(grid)
+	_hud_gold = _make_label(18, Color(1, 0.88, 0.15))
+	_hud_level = _make_label(16, Color(0.8, 0.9, 1.0))
+	_hud_exp = _make_label(10, Color(0.65, 0.75, 1.0))
+	_hud_land = _make_label(10, Color(0.7, 0.65, 0.5))
+	grid.add_child(_hud_gold)
+	grid.add_child(_hud_level)
+	grid.add_child(_hud_exp)
+	grid.add_child(_hud_land)
+
+func _build_tool_toolbar():
+	var toolbar := HBoxContainer.new()
+	toolbar.name = "ToolToolbar"
+	toolbar.anchor_left = 0.5
+	toolbar.anchor_right = 0.5
+	toolbar.anchor_top = 0.8
+	toolbar.anchor_bottom = 0.8
+	toolbar.offset_left = -326.0
+	toolbar.offset_top = 0.0
+	toolbar.offset_right = 326.0
+	toolbar.offset_bottom = 78.0
+	toolbar.add_theme_constant_override("separation", 8)
+	add_child(toolbar)
+	var names := ["普通", "浇水", "施肥", "收获", "铲除", "全铲", "除虫", "除草", "全收", "仓库"]
+	for i in range(names.size()):
+		var button := Button.new()
+		button.custom_minimum_size = Vector2(58, 68)
+		button.focus_mode = Control.FOCUS_NONE
+		button.mouse_filter = Control.MOUSE_FILTER_STOP
+		button.tooltip_text = names[i]
+		button.text = names[i]
+		button.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		button.vertical_icon_alignment = VERTICAL_ALIGNMENT_TOP
+		button.expand_icon = true
+		button.add_theme_font_size_override("font_size", 12)
+		if _cn_font != null:
+			button.add_theme_font_override("font", _cn_font)
+		button.pressed.connect(_on_tool_button_pressed.bind(i))
+		toolbar.add_child(button)
+		_tool_buttons.append(button)
+
+func _build_toast():
+	_toast = _make_label(18, Color.WHITE)
+	_toast.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_toast.anchor_left = 0.5
+	_toast.anchor_right = 0.5
+	_toast.anchor_top = 1.0
+	_toast.anchor_bottom = 1.0
+	_toast.offset_left = -260.0
+	_toast.offset_right = 260.0
+	_toast.offset_top = -54.0
+	_toast.offset_bottom = -14.0
+	_toast.visible = false
+	_toast.add_theme_stylebox_override("normal", _make_panel_style(Color(0, 0, 0, 0.8), Color(0, 0, 0, 0)))
+	add_child(_toast)
+
+func _build_confirm_modals():
+	_reclaim_modal = _make_modal("确认开垦土地", Vector2(420, 200))
+	var reclaim_box := _reclaim_modal.get_node("Panel/Margin/VBox") as VBoxContainer
+	_reclaim_title = _make_label(16, Color(0.18, 0.14, 0.1))
+	_reclaim_level = _make_label(14, Color(0.2, 0.24, 0.42))
+	_reclaim_cost = _make_label(14, Color(0.75, 0.3, 0.05))
+	reclaim_box.add_child(_reclaim_title)
+	reclaim_box.add_child(_reclaim_level)
+	reclaim_box.add_child(_reclaim_cost)
+	reclaim_box.add_child(_make_label_with_text("确认花费金币开垦这块土地吗？", 14, Color(0.28, 0.22, 0.18)))
+	reclaim_box.add_child(_make_button_row("取消", "确认", func():
+		farm_ref._close_reclaim_confirm()
+	, func():
+		farm_ref._try_reclaim_plot(farm_ref.reclaim_confirm_col, farm_ref.reclaim_confirm_row)
+		farm_ref._close_reclaim_confirm()
+	))
+	add_child(_reclaim_modal)
+
+	_reset_modal = _make_modal("确认重置农场", Vector2(480, 220))
+	var reset_box := _reset_modal.get_node("Panel/Margin/VBox") as VBoxContainer
+	reset_box.add_child(_make_label_with_text("这会清空当前存档中的金币、等级、土地、作物和背包数据。", 14, Color(0.22, 0.12, 0.3)))
+	reset_box.add_child(_make_label_with_text("重置后会立即覆盖旧存档，重新进入游戏也不会恢复。", 14, Color(0.45, 0.2, 0.3)))
+	reset_box.add_child(_make_label_with_text("确认要新开档吗？", 15, Color(0.55, 0.18, 0.18)))
+	reset_box.add_child(_make_button_row("取消", "确认重置", func():
+		farm_ref.reset_confirm_open = false
+		farm_ref.queue_redraw()
+	, func():
+		farm_ref.reset_confirm_open = false
+		farm_ref._reset_save_data()
+	))
+	add_child(_reset_modal)
+
+	_shovel_modal = _make_modal("确认铲除全部作物?", Vector2(400, 160))
+	var shovel_box := _shovel_modal.get_node("Panel/Margin/VBox") as VBoxContainer
+	shovel_box.add_child(_make_label_with_text("这将铲除所有地块上的作物，且不可恢复。", 14, Color(0.28, 0.22, 0.18)))
+	shovel_box.add_child(_make_button_row("取消", "确认铲除", func():
+		farm_ref.shovel_all_confirm_open = false
+		farm_ref.queue_redraw()
+	, func():
+		farm_ref.shovel_all_confirm_open = false
+		farm_ref._send_action("shovel_all")
+	))
+	add_child(_shovel_modal)
+
+func _make_modal(title: String, size: Vector2) -> Control:
+	var root := Control.new()
+	root.visible = false
+	root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	root.mouse_filter = Control.MOUSE_FILTER_STOP
+	var shade := ColorRect.new()
+	shade.name = "Shade"
+	shade.set_anchors_preset(Control.PRESET_FULL_RECT)
+	shade.color = Color(0, 0, 0, 0.62)
+	shade.mouse_filter = Control.MOUSE_FILTER_STOP
+	root.add_child(shade)
+	var panel := PanelContainer.new()
+	panel.name = "Panel"
+	panel.custom_minimum_size = size
+	panel.anchor_left = 0.5
+	panel.anchor_right = 0.5
+	panel.anchor_top = 0.5
+	panel.anchor_bottom = 0.5
+	panel.offset_left = -size.x * 0.5
+	panel.offset_top = -size.y * 0.5
+	panel.offset_right = size.x * 0.5
+	panel.offset_bottom = size.y * 0.5
+	panel.add_theme_stylebox_override("panel", _make_panel_style(Color(0.94, 0.9, 0.78), Color(0.48, 0.32, 0.12)))
+	root.add_child(panel)
+	var margin := MarginContainer.new()
+	margin.name = "Margin"
+	margin.add_theme_constant_override("margin_left", 24)
+	margin.add_theme_constant_override("margin_right", 24)
+	margin.add_theme_constant_override("margin_top", 18)
+	margin.add_theme_constant_override("margin_bottom", 18)
+	panel.add_child(margin)
+	var box := VBoxContainer.new()
+	box.name = "VBox"
+	box.add_theme_constant_override("separation", 10)
+	margin.add_child(box)
+	var title_label := _make_label_with_text(title, 18, Color(0.18, 0.14, 0.1))
+	title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	box.add_child(title_label)
+	return root
+
+func _make_button_row(cancel_text: String, confirm_text: String, cancel_cb: Callable, confirm_cb: Callable) -> HBoxContainer:
+	var row := HBoxContainer.new()
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	row.add_theme_constant_override("separation", 24)
+	var cancel := Button.new()
+	cancel.text = cancel_text
+	cancel.custom_minimum_size = Vector2(130, 34)
+	cancel.pressed.connect(cancel_cb)
+	row.add_child(cancel)
+	var confirm := Button.new()
+	confirm.text = confirm_text
+	confirm.custom_minimum_size = Vector2(130, 34)
+	confirm.pressed.connect(confirm_cb)
+	row.add_child(confirm)
+	return row
+
+func _make_label_with_text(text: String, font_size: int, color: Color) -> Label:
+	var label := _make_label(font_size, color)
+	label.text = text
+	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	return label
+
 func _make_button_style(color: Color, border_color: Color) -> StyleBoxFlat:
 	var style := StyleBoxFlat.new()
 	style.bg_color = color
@@ -74,6 +281,32 @@ func _make_button_style(color: Color, border_color: Color) -> StyleBoxFlat:
 	style.content_margin_bottom = 5
 	return style
 
+func _make_panel_style(color: Color, border_color: Color) -> StyleBoxFlat:
+	var style := StyleBoxFlat.new()
+	style.bg_color = color
+	style.border_color = border_color
+	style.border_width_left = 2
+	style.border_width_top = 2
+	style.border_width_right = 2
+	style.border_width_bottom = 2
+	style.corner_radius_top_left = 4
+	style.corner_radius_top_right = 4
+	style.corner_radius_bottom_left = 4
+	style.corner_radius_bottom_right = 4
+	style.content_margin_left = 10
+	style.content_margin_right = 10
+	style.content_margin_top = 4
+	style.content_margin_bottom = 4
+	return style
+
+func _make_label(font_size: int, color: Color) -> Label:
+	var label := Label.new()
+	label.add_theme_font_size_override("font_size", font_size)
+	label.add_theme_color_override("font_color", color)
+	if _cn_font != null:
+		label.add_theme_font_override("font", _cn_font)
+	return label
+
 func _on_top_button_pressed(index: int):
 	if farm_ref == null or not is_instance_valid(farm_ref):
 		return
@@ -89,8 +322,52 @@ func _on_top_button_pressed(index: int):
 	if farm_ref.has_method("_open_top_toolbar_overlay"):
 		farm_ref._open_top_toolbar_overlay(index)
 
+func _on_tool_button_pressed(index: int):
+	if farm_ref == null or not is_instance_valid(farm_ref):
+		return
+	if farm_ref.has_method("_set_tool_mode"):
+		farm_ref._set_tool_mode(index)
+		var mode_names := ["普通", "浇水", "施肥", "收获", "铲除", "全铲", "除虫", "除草", "全收", "仓库"]
+		farm_ref.toast_text = "切换到: " + mode_names[index] + "模式"
+		farm_ref.toast_timer = 1.0
+		queue_redraw()
+
 func _draw():
 	if farm_ref == null or not is_instance_valid(farm_ref):
 		return
-	if farm_ref.has_method("_draw_ui"):
-		farm_ref._draw_ui(self)
+	_update_hud()
+	_update_toolbar()
+	_update_toast()
+	_update_confirm_modals()
+	if farm_ref.has_method("_draw_modal_ui"):
+		farm_ref._draw_modal_ui(self)
+
+func _update_hud():
+	_hud_gold.text = "金币: " + str(farm_ref.gold)
+	_hud_level.text = "Lv." + str(farm_ref.level)
+	_hud_exp.text = str(farm_ref.exp_val) + "/" + str(farm_ref.exp_to_level)
+	_hud_land.text = "地:" + str(farm_ref._get_unlocked_plot_count()) + "/30"
+
+func _update_toolbar():
+	for i in range(_tool_buttons.size()):
+		var button := _tool_buttons[i]
+		button.button_pressed = farm_ref.tool_mode == i
+		if i < TOOL_ICON_TEXTURES.size():
+			button.icon = TOOL_ICON_TEXTURES[i]
+
+func _update_toast():
+	_toast.visible = farm_ref.toast_text != ""
+	_toast.text = farm_ref.toast_text
+	_toast.modulate.a = minf(farm_ref.toast_timer, 1.0)
+
+func _update_confirm_modals():
+	_reclaim_modal.visible = farm_ref.reclaim_confirm_open
+	_reset_modal.visible = farm_ref.reset_confirm_open
+	_shovel_modal.visible = farm_ref.shovel_all_confirm_open
+	if farm_ref.reclaim_confirm_open:
+		var col: int = farm_ref.reclaim_confirm_col
+		var row: int = farm_ref.reclaim_confirm_row
+		var plot_no: int = farm_ref._get_plot_index(col, row) + 1
+		_reclaim_title.text = "第 " + str(plot_no) + " 块地"
+		_reclaim_level.text = "需要等级: " + str(farm_ref._get_reclaim_level(col, row))
+		_reclaim_cost.text = "开垦费用: " + str(farm_ref._get_reclaim_cost(col, row)) + " 金币"

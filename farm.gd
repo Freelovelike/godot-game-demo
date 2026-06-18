@@ -1,6 +1,9 @@
 extends Node2D
 
 const CropAtlas = preload("res://scripts/crop_atlas.gd")
+const FarmApi = preload("res://scenes/farm_api.gd")
+const CameraController = preload("res://scenes/camera_controller.gd")
+const FarmRenderer = preload("res://scenes/farm_renderer.gd")
 const TOOL_ICON_TEXTURES: Array[Texture2D] = [
 	null,
 	preload("res://assets/ui/icons/tool_water.png"),
@@ -13,8 +16,6 @@ const TOOL_ICON_TEXTURES: Array[Texture2D] = [
 	preload("res://assets/ui/icons/btn_harvest_all.png"),
 	preload("res://assets/ui/icons/btn_warehouse.png"),
 ]
-const TOOLBAR_BG_TEXTURE: Texture2D = preload("res://assets/ui/toolbar_bg.png")
-var _toolbar_bg_style: StyleBoxTexture = null
 const TOOL_CURSOR_MAX_SIZE := 48
 const LAND_TEXTURE_PATHS := {
 	"locked": "res://assets/land/land_grass_locked.png",
@@ -58,6 +59,7 @@ const LAND_UPGRADE_WORK_REQUIRED := 30
 
 var CROPS: Array = []
 var CROP_COLORS: Array = []
+var RENDER_STAGE_THRESHOLDS: Array = [0.18, 0.45, 0.72, 0.90]
 
 var gold := 200
 var level := 1
@@ -95,31 +97,18 @@ var _game_time := 0.0 # 游戏内累计秒数，用于保护期判断
 # Auth state (set from Login scene)
 var auth_token := ""
 var user_info := {}
-var http: HTTPRequest
+var farm_api: Node
+var camera_controller: Node
 var _save_pending := false # 云端保存中
-var _http_cb: Callable = Callable() # 当前HTTP回调
+var _config_loaded := false
+var _pending_sell_crop_id := -1
 
 # Camera 拖拽缩放
 var cam: Camera2D
-var _cam_dragging := false
-var _cam_drag_start := Vector2.ZERO
-var _cam_start_pos := Vector2.ZERO
 var _cam_min_zoom := 1.0 # 由 _fit_camera_to_screen 动态更新
-# 触屏状态
-var _touch_count := 0
-var _touch_positions := {} # {finger_index: Vector2}
-var _pinch_start_dist := 0.0
-var _pinch_start_zoom := 1.0
-var _touch_pan_start := Vector2.ZERO
-var _touch_cam_start := Vector2.ZERO
 # UI 绘制目标（CanvasLayer 子节点，画在屏幕坐标系）
 var _ui_draw_target: CanvasItem = null
 var _ui_overlay: Control = null
-var _debug_last_input_raw := Vector2.ZERO
-var _debug_last_input_viewport := Vector2.ZERO
-var _debug_last_input_world := Vector2.ZERO
-var _debug_last_toolbar_hit := -1
-var _debug_last_tile_hit := Vector2i(-1, -1)
 # 中文字体
 var _cn_font: Font = null
 
@@ -139,6 +128,28 @@ var fertilizer_inventory = {} # {fert_index: count}
 var selected_fertilizer = -1 # FERTILIZERS数组下标，-1=未选择
 var shop_tab := 0 # 0=种子, 1=肥料
 
+const DEFAULT_CROPS := [
+	["生菜", 12, 32, 12, "lettuce", 4, 8, 3, 5, 0.06, 0, 0.04, 0, 1],
+	["辣椒", 20, 58, 20, "pepper", 6, 10, 4, 7, 0.10, 0.05, 0.05, 1, 1],
+	["茄子", 35, 95, 32, "eggplant", 5, 19, 3, 6, 0.10, 0.08, 0.08, 2, 2],
+	["西红柿", 55, 150, 48, "tomato", 8, 19, 6, 10, 0.14, 0.09, 0.07, 2, 2],
+	["草莓", 80, 220, 70, "strawberry", 12, 18, 9, 14, 0.16, 0.12, 0.10, 2, 2],
+	["玉米", 120, 340, 100, "corn", 6, 57, 4, 7, 0.18, 0.07, 0.12, 2, 3],
+	["向日葵", 170, 500, 135, "sunflower", 4, 125, 3, 5, 0.13, 0.04, 0.09, 1, 2],
+	["南瓜", 240, 720, 180, "pumpkin", 3, 240, 2, 4, 0.12, 0.11, 0.15, 3, 3],
+	["西瓜", 320, 980, 230, "watermelon", 5, 196, 3, 7, 0.20, 0.12, 0.14, 3, 3],
+]
+
+const DEFAULT_FERTILIZERS: Array = [
+	["初级速生肥", 15, "speed", 0.08, [0, 1], 1, 10],
+	["中级速生肥", 40, "speed", 0.12, [1, 2], 1, 30],
+	["高级速生肥", 80, "speed", 0.18, [2], 1, 60],
+	["保湿肥", 30, "water_protect", 7200.0, [0, 1, 2], 1, 0],
+	["防虫肥", 35, "bug_protect", 7200.0, [1, 2], 1, 0],
+	["除草剂", 25, "weed_protect", 7200.0, [-1, 0, 1, 2], 1, 0],
+	["丰收肥", 60, "yield_bonus", 0.10, [2], 1, 0],
+]
+
 func _ready():
 	# 加载中文字体
 	var font_path := "res://assets/fonts/simhei.ttf"
@@ -149,31 +160,53 @@ func _ready():
 		auth_token = str(get_tree().get_meta("auth_token"))
 		user_info = get_tree().get_meta("user_info") if get_tree().has_meta("user_info") else {}
 
-	# HTTP client for cloud sync
-	http = HTTPRequest.new()
-	http.use_threads = true  # 开启多线程，避免Android端延迟
-	http.timeout = 120.0  # 增加到120秒
-	add_child(http)
+	farm_api = FarmApi.new()
+	farm_api.auth_token = auth_token
+	farm_api.config_completed.connect(_on_config_response)
+	farm_api.load_completed.connect(_on_load_response)
+	farm_api.save_completed.connect(_on_save_response)
+	farm_api.action_completed.connect(_on_action_response)
+	farm_api.sell_completed.connect(_on_sell_response)
+	add_child(farm_api)
 
 	# Camera for pan/zoom
 	cam = Camera2D.new()
 	add_child(cam)
 	cam.make_current()
+	camera_controller = CameraController.new()
+	camera_controller.setup(cam, _cam_min_zoom)
+	camera_controller.tap.connect(_handle_click)
+	add_child(camera_controller)
+	_setup_default_config()
+	_initialize_default_state()
+	_load_land_textures()
+	_init_sandy_base()
+	_build_cursor_cache()
+	_sign_texture = load("res://assets/land/sign.png") as Texture2D
+	_apply_tool_cursor()
+	_init_overlays()
+	_setup_camera()
+	# 设置 UIOverlay 引用，让 UI 在 CanvasLayer 上独立绘制
+	_ui_overlay = get_node_or_null("UILayer/UIOverlay")
+	if _ui_overlay:
+		_ui_overlay.farm_ref = self
+	if auth_token.is_empty():
+		_config_loaded = true
+		_load_game()
+	else:
+		_load_remote_config()
 
-	CROPS = [
-		# [0]名称,[1]种子价,[2]旧售价,[3]成熟秒,[4]key,
-		# [5]base_yield,[6]unit_sell,[7]min_yield,[8]max_yield,
-		# [9]dry/h,[10]bug/h,[11]weed/h,[12]max_bug,[13]max_weed
-		["生菜", 12, 32, 12, "lettuce", 4, 8, 3, 5, 0.06, 0, 0.04, 0, 1],
-		["辣椒", 20, 58, 20, "pepper", 6, 10, 4, 7, 0.10, 0.05, 0.05, 1, 1],
-		["茄子", 35, 95, 32, "eggplant", 5, 19, 3, 6, 0.10, 0.08, 0.08, 2, 2],
-		["西红柿", 55, 150, 48, "tomato", 8, 19, 6, 10, 0.14, 0.09, 0.07, 2, 2],
-		["草莓", 80, 220, 70, "strawberry", 12, 18, 9, 14, 0.16, 0.12, 0.10, 2, 2],
-		["玉米", 120, 340, 100, "corn", 6, 57, 4, 7, 0.18, 0.07, 0.12, 2, 3],
-		["向日葵", 170, 500, 135, "sunflower", 4, 125, 3, 5, 0.13, 0.04, 0.09, 1, 2],
-		["南瓜", 240, 720, 180, "pumpkin", 3, 240, 2, 4, 0.12, 0.11, 0.15, 3, 3],
-		["西瓜", 320, 980, 230, "watermelon", 5, 196, 3, 7, 0.20, 0.12, 0.14, 3, 3],
-	]
+func _setup_camera():
+	cam.position = Vector2(500.0, 530.0)
+	cam.position_smoothing_enabled = false
+	_fit_camera_to_screen()
+	cam.position_smoothing_enabled = true
+	cam.position_smoothing_speed = 8.0
+	get_viewport().size_changed.connect(_fit_camera_to_screen)
+
+func _setup_default_config():
+	CROPS = DEFAULT_CROPS.duplicate(true)
+	FERTILIZERS = DEFAULT_FERTILIZERS.duplicate(true)
 	CROP_COLORS = [
 		[Color(0.42, 0.76, 0.34), Color(0.72, 0.96, 0.46)],
 		[Color(0.24, 0.68, 0.22), Color(0.92, 0.24, 0.18)],
@@ -185,70 +218,84 @@ func _ready():
 		[Color(0.30, 0.70, 0.24), Color(0.96, 0.52, 0.12)],
 		[Color(0.26, 0.66, 0.22), Color(0.34, 0.86, 0.28)],
 	]
-	_initialize_default_state()
-	_load_land_textures()
-	_init_sandy_base()
-	_build_cursor_cache()
-	_sign_texture = load("res://assets/land/sign.png") as Texture2D
-	_load_game()
-	_apply_tool_cursor()
-	_init_overlays()
-	_setup_camera()
-	# 设置 UIOverlay 引用，让 UI 在 CanvasLayer 上独立绘制
-	_ui_overlay = get_node_or_null("UILayer/UIOverlay")
-	if _ui_overlay:
-		_ui_overlay.farm_ref = self
 
-func _setup_camera():
-	cam.position = Vector2(500.0, 530.0)
-	cam.position_smoothing_enabled = false
-	_fit_camera_to_screen()
-	cam.position_smoothing_enabled = true
-	cam.position_smoothing_speed = 8.0
-	get_viewport().size_changed.connect(_fit_camera_to_screen)
+func _load_remote_config():
+	if not is_instance_valid(farm_api):
+		_config_loaded = true
+		_load_game()
+		return
+	farm_api.request_config()
+
+func _on_config_response(result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray):
+	if result == HTTPRequest.RESULT_SUCCESS and response_code == 200:
+		var parsed = JSON.parse_string(body.get_string_from_utf8())
+		if parsed is Dictionary and int(parsed.get("code", -1)) == 0:
+			var data: Dictionary = parsed.get("data", {})
+			_apply_remote_config(data)
+	_config_loaded = true
+	_load_game()
+
+func _apply_remote_config(data: Dictionary):
+	if data.has("crops") and data["crops"] is Array:
+		var crops: Array = []
+		for item in data["crops"]:
+			if not (item is Dictionary):
+				continue
+			var crop: Dictionary = item
+			crops.append([
+				str(crop.get("name", "")),
+				int(crop.get("seed_cost", 0)),
+				int(crop.get("base_yield", 0)) * int(crop.get("unit_sell", 0)),
+				float(crop.get("grow_time", 0.0)),
+				str(crop.get("texture_key", "")),
+				int(crop.get("base_yield", 0)),
+				int(crop.get("unit_sell", 0)),
+				int(crop.get("min_yield", 0)),
+				int(crop.get("max_yield", 0)),
+				float(crop.get("dry_rate", 0.0)),
+				float(crop.get("bug_rate", 0.0)),
+				float(crop.get("weed_rate", 0.0)),
+				int(crop.get("max_bug", 0)),
+				int(crop.get("max_weed", 0)),
+			])
+		if not crops.is_empty():
+			CROPS = crops
+	if data.has("fertilizers") and data["fertilizers"] is Array:
+		var fertilizers: Array = []
+		for item in data["fertilizers"]:
+			if not (item is Dictionary):
+				continue
+			var fert: Dictionary = item
+			var allowed_stages: Array = []
+			var raw_stages = fert.get("allowed_stages", [])
+			if raw_stages is Array:
+				for stage in raw_stages:
+					allowed_stages.append(int(stage))
+			fertilizers.append([
+				str(fert.get("name", "")),
+				int(fert.get("cost", 0)),
+				str(fert.get("type", "")),
+				float(fert.get("effect_value", 0.0)),
+				allowed_stages,
+				int(fert.get("per_crop_limit", 0)),
+				int(fert.get("max_minutes_limit", 0)),
+			])
+		if not fertilizers.is_empty():
+			FERTILIZERS = fertilizers
+	if data.has("render_stage_thresholds") and data["render_stage_thresholds"] is Array:
+		var thresholds: Array = []
+		for value in data["render_stage_thresholds"]:
+			thresholds.append(float(value))
+		if thresholds.size() >= 4:
+			RENDER_STAGE_THRESHOLDS = thresholds
+	_sync_all_overlays()
 
 # 等比缩放：viewport 宽高比 >= 场景宽高比 时以宽为准，否则以高为准
 func _fit_camera_to_screen():
-	var vp: Vector2 = get_viewport().get_visible_rect().size
 	var bg := get_node_or_null("Background")
-	if bg == null or not (bg is Sprite2D) or bg.texture == null:
-		return
-	var scene_size: Vector2 = bg.texture.get_size()
-	# viewport 宽高比 vs 场景宽高比
-	var vp_ratio: float = vp.x / vp.y
-	var scene_ratio: float = scene_size.x / scene_size.y
-	if vp_ratio >= scene_ratio:
-		_cam_min_zoom = vp.x / scene_size.x * 1.1
-	else:
-		_cam_min_zoom = vp.y / scene_size.y * 1.1
-	cam.zoom = Vector2.ONE * _cam_min_zoom
-	cam.position = scene_size * 0.5
-	_clamp_camera()
-
-# 未填满的轴居中，填满的轴超出时允许平移
-func _clamp_camera():
-	if cam == null:
-		return
-	var vp: Vector2 = get_viewport().get_visible_rect().size
-	var bg := get_node_or_null("Background")
-	if bg == null or not (bg is Sprite2D) or bg.texture == null:
-		return
-	var scene_size: Vector2 = bg.texture.get_size()
-	var scene_center: Vector2 = scene_size * 0.5
-	var visible_w: float = vp.x / cam.zoom.x
-	var visible_h: float = vp.y / cam.zoom.y
-	# X轴：场景宽 >= 可见宽时允许平移，否则居中
-	if scene_size.x >= visible_w:
-		var half: float = visible_w * 0.5
-		cam.position.x = clampf(cam.position.x, half, scene_size.x - half)
-	else:
-		cam.position.x = scene_center.x
-	# Y轴：场景高 >= 可见高时允许平移，否则居中
-	if scene_size.y >= visible_h:
-		var half: float = visible_h * 0.5
-		cam.position.y = clampf(cam.position.y, half, scene_size.y - half)
-	else:
-		cam.position.y = scene_center.y
+	if camera_controller != null and bg is Sprite2D:
+		camera_controller.fit_to_background(bg)
+		_cam_min_zoom = camera_controller.min_zoom
 
 func _init_overlays():
 	# ---- ShopOverlay ----
@@ -363,36 +410,42 @@ func _sync_shop_data(shop):
 func _sync_all_overlays():
 	# Refresh any open overlay with latest state
 	var shop := get_node_or_null("UILayer/ShopOverlay")
-	if shop and shop_open:
-		_sync_shop_data(shop)
-		shop.queue_redraw()
+	if shop:
+		shop.CROPS = CROPS
+		shop.CROP_COLORS = CROP_COLORS
+		shop.FERTILIZERS = FERTILIZERS
+		if shop_open:
+			_sync_shop_data(shop)
+			shop.queue_redraw()
 	var inv := get_node_or_null("UILayer/InventoryOverlay")
-	if inv and inventory_open:
-		inv.inventory = inventory
-		inv.queue_redraw()
+	if inv:
+		inv.CROPS = CROPS
+		inv.CROP_COLORS = CROP_COLORS
+		if inventory_open:
+			inv.inventory = inventory
+			inv.queue_redraw()
 
 func _send_sell(crop_id: int, count: int):
-	if count <= 0 or not is_instance_valid(http):
+	if count <= 0 or not is_instance_valid(farm_api):
 		return
-	var url := ApiConfig.API_BASE + "/farm/sell"
-	var headers := ["Content-Type: application/json", "Authorization: Bearer " + auth_token]
-	var body := JSON.stringify({"crop_id": crop_id, "count": count})
-	var cb := func(result: int, response_code: int, _h: PackedStringArray, b: PackedByteArray):
-		if result == HTTPRequest.RESULT_SUCCESS and response_code == 200:
-			var parsed = JSON.parse_string(b.get_string_from_utf8())
-			if parsed is Dictionary and int(parsed.get("code", -1)) == 0:
-				var d: Dictionary = parsed.get("data", {})
-				gold = int(d.get("gold", gold))
-				var sold: int = int(d.get("sold_count", 0))
-				var earned: int = int(d.get("gold_earned", 0))
+	_pending_sell_crop_id = crop_id
+	farm_api.request_sell(crop_id, count)
+
+func _on_sell_response(result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray):
+	if result == HTTPRequest.RESULT_SUCCESS and response_code == 200:
+		var parsed = JSON.parse_string(body.get_string_from_utf8())
+		if parsed is Dictionary and int(parsed.get("code", -1)) == 0:
+			var d: Dictionary = parsed.get("data", {})
+			gold = int(d.get("gold", gold))
+			var sold: int = int(d.get("sold_count", 0))
+			var earned: int = int(d.get("gold_earned", 0))
+			var crop_id := _pending_sell_crop_id
+			_pending_sell_crop_id = -1
+			if crop_id >= 0:
 				inventory[crop_id] = max(0, int(inventory.get(crop_id, 0)) - sold)
 				toast_text = "售出 " + str(CROPS[crop_id][0]) + " x" + str(sold) + "，获得 " + str(earned) + " 金币"
 				toast_timer = 1.5
-	if _http_cb.is_valid() and http.request_completed.is_connected(_http_cb):
-		http.request_completed.disconnect(_http_cb)
-	_http_cb = cb
-	http.request_completed.connect(_http_cb)
-	http.request(url, headers, HTTPClient.METHOD_POST, body)
+			_cloud_load()
 
 func _initialize_default_state():
 	gold = 200
@@ -513,6 +566,7 @@ func _create_empty_cell(col: int, row: int) -> Dictionary:
 	return {
 		"crop_id": - 1,
 		"progress": 0.0,
+		"visual_progress": 0.0,
 		"wet_timer": 0.0,
 		"unlocked": initial_land_level > LAND_LEVEL_LOCKED,
 		"land_level": initial_land_level,
@@ -587,33 +641,7 @@ func in_diamond(px: float, py: float, cx: float, cy: float) -> bool:
 func _process(delta: float):
 	if farm.is_empty() or farm.size() < ROWS:
 		return
-	_game_time += delta
-
-	for r in range(ROWS):
-		if farm[r].size() < COLS:
-			return
-		for c in range(COLS):
-			var cell: Dictionary = farm[r][c]
-			if not _is_cell_unlocked(cell):
-				continue
-			var cid: int = int(cell["crop_id"])
-			var has_crop: bool = cid != -1 and cell["progress"] < 1.0
-
-			# 客户端视觉生长预测（服务端权威覆盖）
-			if has_crop:
-				var gt: float = float(CROPS[cid][3])
-				var speed_mult := 1.0
-				if int(cell.get("water_state", 0)) == 1:
-					speed_mult *= 0.7
-				var bugs: int = int(cell.get("bug_count", 0))
-				if bugs > 0:
-					speed_mult *= maxf(1.0 - bugs * 0.10, 0.3)
-				var weeds: int = int(cell.get("weed_count", 0))
-				if weeds > 0:
-					speed_mult *= maxf(1.0 - weeds * 0.05, 0.5)
-				cell["progress"] = minf(cell["progress"] + delta * speed_mult / gt, 1.0)
-
-			cell["wet_timer"] = maxf(float(cell.get("wet_timer", 0.0)) - delta, 0.0)
+	_update_visual_progress(delta)
 
 	save_timer += delta
 	if save_timer >= 30.0:
@@ -628,68 +656,22 @@ func _process(delta: float):
 	if _ui_overlay and is_instance_valid(_ui_overlay):
 		_ui_overlay.queue_redraw()
 
-func _get_crop_stage_enum(prog: float) -> int:
-	if prog < 0.18:
-		return 0 # 种子期
-	if prog < 0.45:
-		return 1 # 发芽期
-	if prog < 0.90:
-		return 2 # 生长期
-	return 3 # 成熟期
-
-func _check_events():
-	var stage_mult := [0.5, 1.0, 1.2, 0.0]
-	var check_hours := 10.0 / 3600.0
+func _update_visual_progress(delta: float):
+	if auth_token.is_empty():
+		return
 	for r in range(ROWS):
+		if farm[r].size() < COLS:
+			return
 		for c in range(COLS):
 			var cell: Dictionary = farm[r][c]
-			if not _is_cell_unlocked(cell):
+			var cid: int = int(cell.get("crop_id", -1))
+			var server_progress := clampf(float(cell.get("progress", 0.0)), 0.0, 1.0)
+			if cid < 0 or cid >= CROPS.size() or server_progress >= 1.0:
+				cell["visual_progress"] = server_progress
 				continue
-			var cid: int = int(cell["crop_id"])
-			if cid == -1 or cell["progress"] >= 1.0:
-				continue
-			var stage: int = _get_crop_stage_enum(cell["progress"])
-			if stage == 3:
-				continue
-			var sm: float = stage_mult[stage]
-
-			# 缺水事件
-			if int(cell.get("water_state", 0)) == 0:
-				if _game_time >= float(cell.get("water_protect_until", 0.0)):
-					var dry_rate: float = float(CROPS[cid][9])
-					if randf() < dry_rate * check_hours * sm:
-						cell["water_state"] = 1 # DRY
-
-			# 虫害事件
-			var max_bugs: int = int(CROPS[cid][12])
-			if int(cell.get("bug_count", 0)) < max_bugs:
-				if _game_time >= float(cell.get("bug_protect_until", 0.0)):
-					var bug_rate: float = float(CROPS[cid][10])
-					if randf() < bug_rate * check_hours * sm:
-						cell["bug_count"] = int(cell.get("bug_count", 0)) + 1
-						if cell.get("bug_since", 0.0) == 0.0:
-							cell["bug_since"] = _game_time
-
-			# 杂草事件
-			var max_weeds: int = int(CROPS[cid][13])
-			if int(cell.get("weed_count", 0)) < max_weeds:
-				if _game_time >= float(cell.get("weed_protect_until", 0.0)):
-					var weed_rate: float = float(CROPS[cid][11])
-					if randf() < weed_rate * check_hours * sm:
-						cell["weed_count"] = int(cell.get("weed_count", 0)) + 1
-						if cell.get("weed_since", 0.0) == 0.0:
-							cell["weed_since"] = _game_time
-
-func _check_protection_expiry():
-	for r in range(ROWS):
-		for c in range(COLS):
-			var cell: Dictionary = farm[r][c]
-			if not _is_cell_unlocked(cell):
-				continue
-			# 浇水保护期过期，Watered → Normal（如果没缺水）
-			if int(cell.get("water_state", 0)) == 2:
-				if _game_time >= float(cell.get("water_protect_until", 0.0)):
-					cell["water_state"] = 0
+			var grow_time := maxf(float(CROPS[cid][3]), 0.001)
+			var visual_progress := maxf(float(cell.get("visual_progress", server_progress)), server_progress)
+			cell["visual_progress"] = minf(visual_progress + delta / grow_time, 0.999)
 
 func _notification(what: int):
 	if what == NOTIFICATION_WM_CLOSE_REQUEST:
@@ -697,10 +679,6 @@ func _notification(what: int):
 
 func _exit_tree():
 	Input.set_custom_mouse_cursor(null)
-	# 在节点释放前断开 HTTP 回调，防止回调访问已释放的节点
-	if is_instance_valid(http) and _http_cb.is_valid() and http.request_completed.is_connected(_http_cb):
-		http.request_completed.disconnect(_http_cb)
-	_http_cb = Callable()
 
 func _set_tool_mode(mode: int):
 	tool_mode = clampi(mode, 0, TOOL_ICON_TEXTURES.size() - 1)
@@ -742,97 +720,9 @@ func _input(event: InputEvent):
 			queue_redraw()
 			return
 
-	# ---- 触屏：手指按下/抬起 ----
-	if event is InputEventScreenTouch:
-		if event.pressed:
-			var touch_pos := _window_to_viewport_pos(event.position)
-			_touch_positions[event.index] = touch_pos
-			_touch_count += 1
-			if _touch_count == 1:
-				# 单指按下：准备拖拽
-				_touch_pan_start = touch_pos
-				_touch_cam_start = cam.position
-			elif _touch_count == 2:
-				# 双指按下：准备缩放
-				var keys := _touch_positions.keys()
-				var p0: Vector2 = _touch_positions[keys[0]]
-				var p1: Vector2 = _touch_positions[keys[1]]
-				_pinch_start_dist = p0.distance_to(p1)
-				_pinch_start_zoom = cam.zoom.x
-		else:
-			if _touch_count == 1 and event.index in _touch_positions:
-				# 单指抬起：如果没有明显移动，当作点击
-				var touch_pos := _window_to_viewport_pos(event.position)
-				var moved: float = _touch_positions[event.index].distance_to(touch_pos)
-				if moved < 15.0:
-					_handle_click(event.position)
-			_touch_positions.erase(event.index)
-			_touch_count = _touch_positions.size()
-		return
-
-	# ---- 触屏：手指移动 ----
-	if event is InputEventScreenDrag:
-		var touch_pos := _window_to_viewport_pos(event.position)
-		_touch_positions[event.index] = touch_pos
-		if _touch_count == 1:
-			# 单指拖拽：平移相机
-			var delta_screen: Vector2 = _touch_pan_start - touch_pos
-			var delta_world: Vector2 = delta_screen / cam.zoom
-			cam.position = _touch_cam_start + delta_world
-			_clamp_camera()
-			queue_redraw()
-		elif _touch_count == 2:
-			# 双指缩放
-			var keys := _touch_positions.keys()
-			var p0: Vector2 = _touch_positions[keys[0]]
-			var p1: Vector2 = _touch_positions[keys[1]]
-			var dist: float = p0.distance_to(p1)
-			if _pinch_start_dist > 0:
-				var ratio: float = dist / _pinch_start_dist
-				cam.zoom = Vector2.ONE * clampf(_pinch_start_zoom * ratio, _cam_min_zoom, 3.0)
-				_clamp_camera()
-				queue_redraw()
-		return
-
-	# ---- Camera: 中键/右键拖拽平移 ----
-	if event is InputEventMouseButton and (event.button_index == MOUSE_BUTTON_MIDDLE or event.button_index == MOUSE_BUTTON_RIGHT):
-		_cam_dragging = event.pressed
-		if _cam_dragging:
-			_cam_drag_start = event.position
-			_cam_start_pos = cam.position
-		return
-
-	if event is InputEventMouseMotion and _cam_dragging:
-		var mouse_pos: Vector2 = event.position
-		var delta_screen: Vector2 = _cam_drag_start - mouse_pos
-		var delta_world: Vector2 = delta_screen / cam.zoom
-		cam.position = _cam_start_pos + delta_world
-		# 限制平移范围，保持地块在视野内
-		_clamp_camera()
+	if camera_controller != null and camera_controller.handle_input(event):
 		queue_redraw()
 		return
-
-	# ---- Camera: 滚轮缩放（以鼠标位置为中心） ----
-	if event is InputEventMouseButton and event.pressed:
-		if event.button_index == MOUSE_BUTTON_WHEEL_UP or event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-			var vp: Vector2 = get_viewport().get_visible_rect().size
-			var mouse_pos: Vector2 = event.position
-			var old_zoom := cam.zoom.x
-			if event.button_index == MOUSE_BUTTON_WHEEL_UP:
-				cam.zoom *= 1.1
-			else:
-				cam.zoom /= 1.1
-			cam.zoom = cam.zoom.clampf(_cam_min_zoom, 3.0)
-			var new_zoom := cam.zoom.x
-			if new_zoom != old_zoom:
-				# 以鼠标位置为中心缩放：计算鼠标在世界坐标中的位置，缩放后保持不变
-				var vp_center: Vector2 = vp * 0.5
-				var mouse_offset: Vector2 = mouse_pos - vp_center
-				var world_offset: Vector2 = mouse_offset / old_zoom
-				cam.position += world_offset * (1.0 - old_zoom / new_zoom)
-			_clamp_camera()
-			queue_redraw()
-			return
 
 	var vp: Vector2 = get_viewport().get_visible_rect().size
 
@@ -847,11 +737,8 @@ func _input(event: InputEvent):
 	# --- Mouse motion ---
 	if event is InputEventMouseMotion:
 		var mouse_pos: Vector2 = event.position
-		_debug_last_input_raw = event.position
-		_debug_last_input_viewport = mouse_pos
 		# 地块 hover 用世界坐标
 		var wp := _viewport_to_world(mouse_pos)
-		_debug_last_input_world = wp
 		var wx: float = wp.x
 		var wy: float = wp.y
 		hover_col = -1
@@ -890,43 +777,9 @@ func _input(event: InputEvent):
 		var wp := _viewport_to_world(mouse_pos)
 		var wx: float = wp.x
 		var wy: float = wp.y
-		_debug_last_input_raw = event.position
-		_debug_last_input_viewport = mouse_pos
-		_debug_last_input_world = wp
-		_debug_last_toolbar_hit = -1
-		_debug_last_tile_hit = Vector2i(-1, -1)
 		mouse_held = false # only set true if click is on the grid
 
-		# Check reclaim confirmation overlay (屏幕坐标)
-		if reclaim_confirm_open:
-			var reclaim_rect := _get_reclaim_confirm_rect()
-			var cancel_rect := Rect2(reclaim_rect.position.x + 40, reclaim_rect.position.y + 145, 130, 34)
-			var confirm_rect := Rect2(reclaim_rect.position.x + reclaim_rect.size.x - 170, reclaim_rect.position.y + 145, 130, 34)
-			if not _point_in_rect(Vector2(mx, my), reclaim_rect):
-				_close_reclaim_confirm()
-				return
-			if _point_in_rect(Vector2(mx, my), cancel_rect):
-				_close_reclaim_confirm()
-				return
-			if _point_in_rect(Vector2(mx, my), confirm_rect):
-				_try_reclaim_plot(reclaim_confirm_col, reclaim_confirm_row)
-				_close_reclaim_confirm()
-				return
-			return
-
-		# Check shovel-all confirmation overlay (屏幕坐标)
-		if shovel_all_confirm_open:
-			var sa_rect := Rect2(vp.x * 0.5 - 200, vp.y * 0.5 - 80, 400, 160)
-			var sa_cancel := Rect2(sa_rect.position.x + 40, sa_rect.position.y + 120, 130, 30)
-			var sa_confirm := Rect2(sa_rect.position.x + sa_rect.size.x - 170, sa_rect.position.y + 120, 130, 30)
-			if not _point_in_rect(Vector2(mx, my), sa_rect):
-				shovel_all_confirm_open = false; queue_redraw(); return
-			if _point_in_rect(Vector2(mx, my), sa_cancel):
-				shovel_all_confirm_open = false; queue_redraw(); return
-			if _point_in_rect(Vector2(mx, my), sa_confirm):
-				shovel_all_confirm_open = false
-				_send_action("shovel_all")
-				return
+		if reclaim_confirm_open or shovel_all_confirm_open or reset_confirm_open:
 			return
 
 		# Check warehouse overlay (屏幕坐标)
@@ -935,25 +788,6 @@ func _input(event: InputEvent):
 			var wox := (vp.x - ww) / 2; var woy := (vp.y - wh) / 2
 			if mx < wox or mx > wox + ww or my < woy or my > woy + wh:
 				warehouse_open = false; queue_redraw(); return
-			return
-
-		# Check reset confirmation overlay (屏幕坐标)
-		if reset_confirm_open:
-			var reset_rect := _get_reset_confirm_rect()
-			var reset_cancel_rect := Rect2(reset_rect.position.x + 50, reset_rect.position.y + 165, 150, 36)
-			var reset_confirm_rect := Rect2(reset_rect.position.x + reset_rect.size.x - 200, reset_rect.position.y + 165, 150, 36)
-			if not _point_in_rect(Vector2(mx, my), reset_rect):
-				reset_confirm_open = false
-				queue_redraw()
-				return
-			if _point_in_rect(Vector2(mx, my), reset_cancel_rect):
-				reset_confirm_open = false
-				queue_redraw()
-				return
-			if _point_in_rect(Vector2(mx, my), reset_confirm_rect):
-				reset_confirm_open = false
-				_reset_save_data()
-				return
 			return
 
 		# Check context menu
@@ -991,7 +825,6 @@ func _input(event: InputEvent):
 						best_col = col
 						best_row = row
 		if best_col >= 0:
-			_debug_last_tile_hit = Vector2i(best_col, best_row)
 			mouse_held = true
 			_open_context_menu(best_col, best_row)
 			last_action_col = best_col
@@ -999,23 +832,6 @@ func _input(event: InputEvent):
 			queue_redraw()
 			return
 
-		# Tool mode buttons (屏幕坐标)
-		var tb_btn_s: float = 58.0
-		var tb_btn_g: float = 8.0
-		var tb_total2: float = 10.0 * tb_btn_s + 9.0 * tb_btn_g
-		var tb_sx: float = vp.x * 0.5 - tb_total2 * 0.5
-		var tb_y2: float = vp.y * 0.8
-		if my >= tb_y2 and my <= tb_y2 + 78:
-			for ti in range(10):
-				var bx2: float = tb_sx + ti * (tb_btn_s + tb_btn_g)
-				if mx >= bx2 and mx <= bx2 + tb_btn_s:
-					_debug_last_toolbar_hit = ti
-					_set_tool_mode(ti)
-					var mode_names2 := ["普通", "浇水", "施肥", "收获", "铲除", "全铲", "除虫", "除草", "全收", "仓库"]
-					toast_text = "切换到: " + mode_names2[ti] + "模式"
-					toast_timer = 1.0
-					queue_redraw()
-					return
 func _do_tile_action(col: int, row: int):
 	if farm.is_empty() or row >= farm.size() or col >= farm[row].size():
 		return
@@ -1178,11 +994,6 @@ func _handle_click(screen_pos: Vector2):
 	var viewport_pos := _window_to_viewport_pos(screen_pos)
 	var mx: float = viewport_pos.x
 	var my: float = viewport_pos.y
-	_debug_last_input_raw = screen_pos
-	_debug_last_input_viewport = viewport_pos
-	_debug_last_input_world = _viewport_to_world(viewport_pos)
-	_debug_last_toolbar_hit = -1
-	_debug_last_tile_hit = Vector2i(-1, -1)
 	# overlay 打开时，不处理触屏点击（overlay 有自己的 _input 处理）
 	if shop_open or inventory_open or settings_open:
 		return
@@ -1213,40 +1024,18 @@ func _handle_click(screen_pos: Vector2):
 					best_col = col
 					best_row = row
 	if best_col >= 0:
-		_debug_last_tile_hit = Vector2i(best_col, best_row)
 		_do_tile_action(best_col, best_row)
 		queue_redraw()
 		return
-	# 工具栏按钮（屏幕坐标）
-	var tb_btn_s: float = 58.0
-	var tb_btn_g: float = 8.0
-	var tb_total: float = 10.0 * tb_btn_s + 9.0 * tb_btn_g
-	var tb_sx: float = vp.x * 0.5 - tb_total * 0.5
-	var tb_y: float = vp.y * 0.8
-	if my >= tb_y and my <= tb_y + 78:
-		for ti in range(10):
-			var bx: float = tb_sx + ti * (tb_btn_s + tb_btn_g)
-			if mx >= bx and mx <= bx + tb_btn_s:
-				_debug_last_toolbar_hit = ti
-				_set_tool_mode(ti)
-				queue_redraw()
-				return
 # ---- Server action API ----
 func _send_action(action: String, params: Dictionary = {}):
 	if auth_token.is_empty():
 		toast_text = "未登录，无法执行操作"
 		toast_timer = 1.5
 		return
-	if not is_instance_valid(http):
+	if not is_instance_valid(farm_api):
 		return
-	params["action"] = action
-	var url := ApiConfig.API_BASE + "/farm/action"
-	var headers := ["Content-Type: application/json", "Authorization: Bearer " + auth_token]
-	if _http_cb.is_valid() and http.request_completed.is_connected(_http_cb):
-		http.request_completed.disconnect(_http_cb)
-	_http_cb = _on_action_response
-	http.request_completed.connect(_http_cb)
-	http.request(url, headers, HTTPClient.METHOD_POST, JSON.stringify(params))
+	farm_api.request_action(action, params)
 
 func _on_action_response(result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray):
 	if result != HTTPRequest.RESULT_SUCCESS:
@@ -1317,7 +1106,9 @@ func _apply_state(data: Dictionary):
 			cell["land_work"] = int(p.get("land_work", 0))
 			var cid_raw = p.get("crop_id", null)
 			cell["crop_id"] = int(cid_raw) if cid_raw != null else -1
-			cell["progress"] = clampf(float(p.get("progress", 0.0)), 0.0, 1.0)
+			var progress := clampf(float(p.get("progress", 0.0)), 0.0, 1.0)
+			cell["progress"] = progress
+			cell["visual_progress"] = progress
 			cell["wet_timer"] = maxf(float(p.get("wet_timer", 0.0)), 0.0)
 			cell["water_state"] = int(p.get("water_state", 0))
 			cell["dry_timer"] = maxf(float(p.get("dry_timer", 0.0)), 0.0)
@@ -1329,12 +1120,38 @@ func _apply_state(data: Dictionary):
 			cell["weed_since"] = float(p.get("weed_since", 0.0))
 			cell["weed_protect_until"] = float(p.get("weed_protect_until", 0.0))
 			cell["fert_used"] = clampi(int(p.get("fert_used", 0)), 0, 3)
+			cell["fert_stage_used"] = _parse_dictish_json(p.get("fert_stage_used", {}))
+			cell["fert_ids_used"] = _parse_arrayish_json(p.get("fert_ids_used", []))
 			cell["yield_bonus_rate"] = maxf(float(p.get("yield_bonus_rate", 0.0)), 0.0)
 			cell["yield_loss_rate"] = clampf(float(p.get("yield_loss_rate", 0.0)), 0.0, 0.30)
 	_sync_all_overlays()
 	queue_redraw()
 
+func _parse_dictish_json(value) -> Dictionary:
+	if value is Dictionary:
+		return value
+	if value is String:
+		var parsed = JSON.parse_string(value)
+		if parsed is Dictionary:
+			return parsed
+	return {}
+
+func _parse_arrayish_json(value) -> Array:
+	if value is Array:
+		return value
+	if value is String:
+		var parsed = JSON.parse_string(value)
+		if parsed is Array:
+			return parsed
+	return []
+
 func _try_reclaim_plot(col: int, row: int):
+	var pi: int = _get_plot_index(col, row)
+	if not auth_token.is_empty():
+		# 服务端权威：开垦校验与扣费全部由后端处理
+		_send_action("reclaim", {"plot_index": pi})
+		return
+	# 离线模式：本地校验扣费
 	var next_locked := _get_next_locked_plot()
 	if next_locked.x != col or next_locked.y != row:
 		toast_text = "请按顺序先开垦下一块土地"
@@ -1357,7 +1174,7 @@ func _try_reclaim_plot(col: int, row: int):
 	farm[row][col]["crop_id"] = -1
 	farm[row][col]["progress"] = 0.0
 	farm[row][col]["wet_timer"] = 0.0
-	toast_text = "开垦成功! 解锁第 " + str(_get_plot_index(col, row) + 1) + " 块地"
+	toast_text = "开垦成功! 解锁第 " + str(pi + 1) + " 块地"
 	toast_timer = 2.0
 	_save_game(false)
 
@@ -1393,64 +1210,9 @@ func _reset_save_data():
 	toast_timer = 2.0
 	queue_redraw()
 
-func _get_reclaim_confirm_rect() -> Rect2:
-	var vp: Vector2 = get_viewport().get_visible_rect().size
-	return Rect2(vp.x * 0.5 - 210.0, vp.y * 0.5 - 100.0, 420.0, 200.0)
-
-func _get_reset_confirm_rect() -> Rect2:
-	var vp: Vector2 = get_viewport().get_visible_rect().size
-	return Rect2(vp.x * 0.5 - 240.0, vp.y * 0.5 - 110.0, 480.0, 220.0)
-
 func _point_in_rect(point: Vector2, rect: Rect2) -> bool:
 	return point.x >= rect.position.x and point.x <= rect.position.x + rect.size.x and point.y >= rect.position.y and point.y <= rect.position.y + rect.size.y
 
-
-func _harvest_all():
-	var count := 0
-	for r in range(ROWS):
-		for c in range(COLS):
-			var cell: Dictionary = farm[r][c]
-			if not _is_cell_unlocked(cell):
-				continue
-			if cell["crop_id"] != -1 and cell["progress"] >= 1.0:
-				var cid: int = int(cell["crop_id"])
-				var yield_count := _calc_harvest_yield(cell, cid)
-				exp_val += int(CROPS[cid][2]) / 5
-				_add_to_inventory(cid, yield_count)
-				_add_land_work(r, c, 1)
-				cell["crop_id"] = -1
-				cell["progress"] = 0.0
-				cell["wet_timer"] = 0.0
-				cell["water_state"] = 0; cell["dry_timer"] = 0.0
-				cell["bug_count"] = 0; cell["bug_since"] = 0.0
-				cell["weed_count"] = 0; cell["weed_since"] = 0.0
-				cell["fert_used"] = 0; cell["fert_stage_used"] = {}; cell["fert_ids_used"] = []
-				cell["yield_bonus_rate"] = 0.0; cell["yield_loss_rate"] = 0.0
-				count += 1
-	if count > 0:
-		_check_lv()
-		toast_text = "一键收获了 " + str(count) + " 个作物，已放入背包"
-		toast_timer = 2.0
-	else:
-		toast_text = "没有成熟的作物!"
-		toast_timer = 2.0
-
-func _shovel_all_crops():
-	var count := 0
-	for r in range(ROWS):
-		for c in range(COLS):
-			var cell: Dictionary = farm[r][c]
-			if _is_cell_unlocked(cell) and cell["crop_id"] != -1:
-				cell["crop_id"] = -1
-				cell["progress"] = 0.0
-				cell["wet_timer"] = 0.0
-				count += 1
-	if count > 0:
-		toast_text = "铲除了全部 " + str(count) + " 个作物"
-		toast_timer = 2.0
-	else:
-		toast_text = "没有作物可以铲除"
-		toast_timer = 2.0
 
 func _add_land_work(row: int, col: int, amount: int):
 	var cell: Dictionary = farm[row][col]
@@ -1465,33 +1227,6 @@ func _add_land_work(row: int, col: int, amount: int):
 		toast_timer = 2.0
 	else:
 		cell["land_work"] = work
-
-func _calc_harvest_yield(cell: Dictionary, cid: int) -> int:
-	var base: int = int(CROPS[cid][5])
-	var bonus := int(base * float(cell.get("yield_bonus_rate", 0.0)))
-	# 产量损失计算
-	var loss := 0.0
-	var dt: float = float(cell.get("dry_timer", 0.0))
-	if dt >= 5400.0:
-		loss += 0.10
-	elif dt >= 1800.0:
-		loss += 0.05
-	var bc: int = int(cell.get("bug_count", 0))
-	if bc >= 3:
-		loss += 0.10
-	elif bc >= 2:
-		loss += 0.05
-	var wc: int = int(cell.get("weed_count", 0))
-	if wc >= 3:
-		loss += 0.10
-	elif wc >= 2:
-		loss += 0.05
-	loss = minf(loss, 0.30)
-	var result := base + bonus - int(base * loss)
-	# 丰收肥保底至少+1
-	if float(cell.get("yield_bonus_rate", 0.0)) > 0.0 and bonus == 0:
-		result += 1
-	return clampi(result, int(CROPS[cid][7]), int(CROPS[cid][8]))
 
 func _add_to_inventory(cid: int, amount: int):
 	var key_str = str(cid)
@@ -1552,12 +1287,6 @@ func _handle_inventory_click(mx: float, my: float):
 					return
 			item_count += 1
 
-func _check_lv():
-	while exp_val >= exp_to_level:
-		exp_val -= exp_to_level
-		level += 1
-		exp_to_level = int(exp_to_level * 1.5)
-
 func _get_unlocked_plot_count() -> int:
 	var count := 0
 	for r in range(ROWS):
@@ -1574,18 +1303,19 @@ func _get_next_locked_plot() -> Vector2i:
 	return Vector2i(-1, -1)
 
 func _save_game(show_toast := true):
+	var payload := _build_save_payload()
 	var data := {
-		"gold": gold,
-		"level": level,
-		"exp_val": exp_val,
-		"exp_to_level": exp_to_level,
-		"farm": farm,
-		"inventory": inventory,
-		"selected_seed": selected_seed,
-		"tool_mode": tool_mode,
-		"fertilizer_inventory": fertilizer_inventory,
-		"selected_fertilizer": selected_fertilizer,
-		"game_time": _game_time,
+		"gold": payload["gold"],
+		"level": payload["level"],
+		"exp_val": payload["exp_val"],
+		"exp_to_level": payload["exp_to_level"],
+		"plots": payload["plots"],
+		"inventory": payload["inventory"],
+		"selected_seed": payload["selected_seed"],
+		"tool_mode": payload["tool_mode"],
+		"fertilizer_inventory": payload["fertilizer_inventory"],
+		"selected_fertilizer": payload["selected_fertilizer"],
+		"game_time": payload["game_time"],
 		"saved_at": int(Time.get_unix_time_from_system()),
 	}
 	var file := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
@@ -1603,21 +1333,14 @@ func _save_game(show_toast := true):
 		_cloud_save()
 
 func _cloud_save():
-	if not is_instance_valid(http):
+	if not is_instance_valid(farm_api):
 		return
 	_save_pending = true
 	var payload := _build_save_payload()
-	var url := ApiConfig.API_BASE + "/farm/save"
-	var headers := ["Content-Type: application/json", "Authorization: Bearer " + auth_token]
-	var cb := func(result: int, response_code: int, _headers: PackedStringArray, _body: PackedByteArray):
-		_save_pending = false
-		if result == HTTPRequest.RESULT_SUCCESS and response_code == 200:
-			pass # 静默成功
-	if _http_cb.is_valid() and http.request_completed.is_connected(_http_cb):
-		http.request_completed.disconnect(_http_cb)
-	_http_cb = cb
-	http.request_completed.connect(_http_cb)
-	http.request(url, headers, HTTPClient.METHOD_POST, JSON.stringify(payload))
+	farm_api.request_save(payload)
+
+func _on_save_response(_result: int, _response_code: int, _headers: PackedStringArray, _body: PackedByteArray):
+	_save_pending = false
 
 func _build_save_payload() -> Dictionary:
 	var plots: Array = []
@@ -1642,8 +1365,8 @@ func _build_save_payload() -> Dictionary:
 				"weed_since": cell.get("weed_since", 0.0),
 				"weed_protect_until": cell.get("weed_protect_until", 0.0),
 				"fert_used": cell.get("fert_used", 0),
-				"fert_stage_used": JSON.stringify(cell.get("fert_stage_used", {})),
-				"fert_ids_used": JSON.stringify(cell.get("fert_ids_used", [])),
+				"fert_stage_used": cell.get("fert_stage_used", {}),
+				"fert_ids_used": cell.get("fert_ids_used", []),
 				"yield_bonus_rate": cell.get("yield_bonus_rate", 0.0),
 				"yield_loss_rate": cell.get("yield_loss_rate", 0.0),
 			}
@@ -1669,7 +1392,48 @@ func _stringify_int_keys(dict: Dictionary) -> Dictionary:
 		out[str(k)] = dict[k]
 	return out
 
+func _legacy_farm_to_plots(saved_farm: Array) -> Array:
+	var plots: Array = []
+	for r in range(mini(ROWS, saved_farm.size())):
+		if not (saved_farm[r] is Array):
+			continue
+		var saved_row: Array = saved_farm[r]
+		for c in range(mini(COLS, saved_row.size())):
+			if not (saved_row[c] is Dictionary):
+				continue
+			var saved_cell: Dictionary = saved_row[c]
+			var cid := int(saved_cell.get("crop_id", -1))
+			var was_unlocked := bool(saved_cell.get("unlocked", cid != -1 or _get_plot_index(c, r) < INITIAL_UNLOCKED_PLOTS))
+			var land_level := int(saved_cell.get("land_level", 1 if was_unlocked else LAND_LEVEL_LOCKED))
+			land_level = clampi(land_level, LAND_LEVEL_LOCKED, LAND_LEVEL_MAX)
+			plots.append({
+				"plot_index": _get_plot_index(c, r),
+				"unlocked": land_level > LAND_LEVEL_LOCKED,
+				"land_level": land_level,
+				"land_work": clampi(int(saved_cell.get("land_work", 0)), 0, LAND_UPGRADE_WORK_REQUIRED - 1),
+				"crop_id": cid if cid >= 0 else null,
+				"progress": clampf(float(saved_cell.get("progress", 0.0)), 0.0, 1.0),
+				"wet_timer": maxf(float(saved_cell.get("wet_timer", 0.0)), 0.0),
+				"water_state": int(saved_cell.get("water_state", 0)),
+				"dry_timer": maxf(float(saved_cell.get("dry_timer", 0.0)), 0.0),
+				"water_protect_until": float(saved_cell.get("water_protect_until", 0.0)),
+				"bug_count": clampi(int(saved_cell.get("bug_count", 0)), 0, 3),
+				"bug_since": float(saved_cell.get("bug_since", 0.0)),
+				"bug_protect_until": float(saved_cell.get("bug_protect_until", 0.0)),
+				"weed_count": clampi(int(saved_cell.get("weed_count", 0)), 0, 3),
+				"weed_since": float(saved_cell.get("weed_since", 0.0)),
+				"weed_protect_until": float(saved_cell.get("weed_protect_until", 0.0)),
+				"fert_used": clampi(int(saved_cell.get("fert_used", 0)), 0, 3),
+				"fert_stage_used": saved_cell.get("fert_stage_used", {}),
+				"fert_ids_used": saved_cell.get("fert_ids_used", []),
+				"yield_bonus_rate": maxf(float(saved_cell.get("yield_bonus_rate", 0.0)), 0.0),
+				"yield_loss_rate": clampf(float(saved_cell.get("yield_loss_rate", 0.0)), 0.0, 0.30),
+			})
+	return plots
+
 func _load_game():
+	if not _config_loaded:
+		return
 	# 服务端权威：登录状态从云端加载，否则本地
 	if not auth_token.is_empty():
 		_cloud_load()
@@ -1684,104 +1448,35 @@ func _load_game():
 	if not (parsed is Dictionary):
 		return
 	var data: Dictionary = parsed
-	gold = int(data.get("gold", gold))
-	level = int(data.get("level", level))
-	exp_val = int(data.get("exp_val", exp_val))
-	exp_to_level = int(data.get("exp_to_level", exp_to_level))
-	selected_seed = int(data.get("selected_seed", selected_seed))
-	_set_tool_mode(int(data.get("tool_mode", tool_mode)))
-	if data.has("inventory") and (data["inventory"] is Dictionary):
-		inventory = data["inventory"]
-		_normalize_inventory_keys()
+	if data.has("farm") and not data.has("plots"):
+		data["plots"] = _legacy_farm_to_plots(data["farm"])
 	if data.has("farm") and (data["farm"] is Array):
-		_restore_farm(data["farm"])
+		data.erase("farm")
+	_apply_state(data)
 
 func _cloud_load():
-	if not is_instance_valid(http):
+	if not is_instance_valid(farm_api):
 		return
-	var url := ApiConfig.API_BASE + "/farm/load"
-	var headers := ["Authorization: Bearer " + auth_token]
-	var cb := func(result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray):
-		if result != HTTPRequest.RESULT_SUCCESS or response_code != 200:
-			return # 云端失败，保留本地数据
-		var parsed = JSON.parse_string(body.get_string_from_utf8())
-		if not (parsed is Dictionary):
-			return
-		var resp: Dictionary = parsed
-		if int(resp.get("code", -1)) != 0:
-			return
-		var d: Dictionary = resp.get("data", {})
-		if d.is_empty():
-			return
-		_apply_cloud_data(d)
-		toast_text = "云端存档已同步"
-		toast_timer = 2.0
-	if _http_cb.is_valid() and http.request_completed.is_connected(_http_cb):
-		http.request_completed.disconnect(_http_cb)
-	_http_cb = cb
-	http.request_completed.connect(_http_cb)
-	http.request(url, headers, HTTPClient.METHOD_GET)
+	farm_api.request_load()
+
+func _on_load_response(result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray):
+	if result != HTTPRequest.RESULT_SUCCESS or response_code != 200:
+		return # 云端失败，保留本地数据
+	var parsed = JSON.parse_string(body.get_string_from_utf8())
+	if not (parsed is Dictionary):
+		return
+	var resp: Dictionary = parsed
+	if int(resp.get("code", -1)) != 0:
+		return
+	var d: Dictionary = resp.get("data", {})
+	if d.is_empty():
+		return
+	_apply_cloud_data(d)
+	toast_text = "云端存档已同步"
+	toast_timer = 2.0
 
 func _apply_cloud_data(data: Dictionary):
-	gold = int(data.get("gold", gold))
-	level = int(data.get("level", level))
-	exp_val = int(data.get("exp_val", exp_val))
-	exp_to_level = int(data.get("exp_to_level", exp_to_level))
-	_game_time = float(data.get("game_time", _game_time))
-	selected_seed = int(data.get("selected_seed", selected_seed))
-	_set_tool_mode(int(data.get("tool_mode", tool_mode)))
-	if data.has("inventory") and (data["inventory"] is Dictionary):
-		inventory = data["inventory"]
-		_normalize_inventory_keys()
-	# Sync fertilizer inventory
-	if data.has("fertilizer_inventory") and (data["fertilizer_inventory"] is Dictionary):
-		fertilizer_inventory = {}
-		for k in data["fertilizer_inventory"].keys():
-			fertilizer_inventory[int(k)] = int(data["fertilizer_inventory"][k])
-	# plots 数组 → farm 二维数组
-	if data.has("plots") and (data["plots"] is Array):
-		for p in data["plots"]:
-			if not (p is Dictionary):
-				continue
-			var pi: int = int(p.get("plot_index", -1))
-			if pi < 0 or pi >= ROWS * COLS:
-				continue
-			var r: int = pi / COLS
-			var c: int = pi % COLS
-			var cell: Dictionary = farm[r][c]
-			cell["unlocked"] = bool(p.get("unlocked", false))
-			cell["land_level"] = int(p.get("land_level", 0))
-			cell["land_work"] = int(p.get("land_work", 0))
-			var cid_raw = p.get("crop_id", null)
-			cell["crop_id"] = int(cid_raw) if cid_raw != null else -1
-			cell["progress"] = clampf(float(p.get("progress", 0.0)), 0.0, 1.0)
-			cell["wet_timer"] = maxf(float(p.get("wet_timer", 0.0)), 0.0)
-			cell["water_state"] = int(p.get("water_state", 0))
-			cell["dry_timer"] = maxf(float(p.get("dry_timer", 0.0)), 0.0)
-			cell["water_protect_until"] = float(p.get("water_protect_until", 0.0))
-			cell["bug_count"] = clampi(int(p.get("bug_count", 0)), 0, 3)
-			cell["bug_since"] = float(p.get("bug_since", 0.0))
-			cell["bug_protect_until"] = float(p.get("bug_protect_until", 0.0))
-			cell["weed_count"] = clampi(int(p.get("weed_count", 0)), 0, 3)
-			cell["weed_since"] = float(p.get("weed_since", 0.0))
-			cell["weed_protect_until"] = float(p.get("weed_protect_until", 0.0))
-			cell["fert_used"] = clampi(int(p.get("fert_used", 0)), 0, 3)
-			var fsu_raw = p.get("fert_stage_used", "{}")
-			if fsu_raw is String:
-				var parsed_fsu = JSON.parse_string(fsu_raw)
-				cell["fert_stage_used"] = parsed_fsu if parsed_fsu is Dictionary else {}
-			else:
-				cell["fert_stage_used"] = fsu_raw if fsu_raw is Dictionary else {}
-			var fiu_raw = p.get("fert_ids_used", "[]")
-			if fiu_raw is String:
-				var parsed_fiu = JSON.parse_string(fiu_raw)
-				cell["fert_ids_used"] = parsed_fiu if parsed_fiu is Array else []
-			else:
-				cell["fert_ids_used"] = fiu_raw if fiu_raw is Array else []
-			cell["yield_bonus_rate"] = maxf(float(p.get("yield_bonus_rate", 0.0)), 0.0)
-			cell["yield_loss_rate"] = clampf(float(p.get("yield_loss_rate", 0.0)), 0.0, 0.30)
-	_sync_all_overlays()
-	queue_redraw()
+	_apply_state(data)
 
 func _normalize_inventory_keys():
 	var fixed := {}
@@ -1790,575 +1485,19 @@ func _normalize_inventory_keys():
 		fixed[cid] = int(inventory[key])
 	inventory = fixed
 
-func _restore_farm(saved_farm: Array):
-	for r in range(mini(ROWS, saved_farm.size())):
-		if not (saved_farm[r] is Array):
-			continue
-		var saved_row: Array = saved_farm[r]
-		for c in range(mini(COLS, saved_row.size())):
-			if saved_row[c] is Dictionary:
-				var saved_cell: Dictionary = saved_row[c]
-				var cid := int(saved_cell.get("crop_id", -1))
-				if cid >= -1 and cid < CROPS.size():
-					farm[r][c]["crop_id"] = cid
-					farm[r][c]["progress"] = clampf(float(saved_cell.get("progress", 0.0)), 0.0, 1.0)
-					farm[r][c]["wet_timer"] = maxf(float(saved_cell.get("wet_timer", 0.0)), 0.0)
-					var was_unlocked := bool(saved_cell.get("unlocked", cid != -1 or _get_plot_index(c, r) < INITIAL_UNLOCKED_PLOTS))
-					var land_level := int(saved_cell.get("land_level", 1 if was_unlocked else LAND_LEVEL_LOCKED))
-					land_level = clampi(land_level, LAND_LEVEL_LOCKED, LAND_LEVEL_MAX)
-					farm[r][c]["land_level"] = land_level
-					farm[r][c]["land_work"] = clampi(int(saved_cell.get("land_work", 0)), 0, LAND_UPGRADE_WORK_REQUIRED - 1)
-					farm[r][c]["unlocked"] = land_level > LAND_LEVEL_LOCKED
-					# 新打理字段（向后兼容，旧存档缺失时用默认值）
-					farm[r][c]["water_state"] = int(saved_cell.get("water_state", 0))
-					farm[r][c]["dry_timer"] = maxf(float(saved_cell.get("dry_timer", 0.0)), 0.0)
-					farm[r][c]["water_protect_until"] = float(saved_cell.get("water_protect_until", 0.0))
-					farm[r][c]["bug_count"] = clampi(int(saved_cell.get("bug_count", 0)), 0, 3)
-					farm[r][c]["bug_since"] = float(saved_cell.get("bug_since", 0.0))
-					farm[r][c]["bug_protect_until"] = float(saved_cell.get("bug_protect_until", 0.0))
-					farm[r][c]["weed_count"] = clampi(int(saved_cell.get("weed_count", 0)), 0, 3)
-					farm[r][c]["weed_since"] = float(saved_cell.get("weed_since", 0.0))
-					farm[r][c]["weed_protect_until"] = float(saved_cell.get("weed_protect_until", 0.0))
-					farm[r][c]["fert_used"] = clampi(int(saved_cell.get("fert_used", 0)), 0, 3)
-					farm[r][c]["fert_stage_used"] = saved_cell.get("fert_stage_used", {})
-					farm[r][c]["fert_ids_used"] = saved_cell.get("fert_ids_used", [])
-					farm[r][c]["yield_bonus_rate"] = maxf(float(saved_cell.get("yield_bonus_rate", 0.0)), 0.0)
-					farm[r][c]["yield_loss_rate"] = clampf(float(saved_cell.get("yield_loss_rate", 0.0)), 0.0, 0.30)
-
-func _apply_offline_growth(saved_at: int):
-	var elapsed: int = maxi(0, int(Time.get_unix_time_from_system()) - saved_at)
-	if elapsed <= 0:
-		return
-	_game_time += float(elapsed)
-	var grew_count := 0
-	var event_count := 0
-	var elapsed_hours: float = float(elapsed) / 3600.0
-	var stage_mult := [0.5, 1.0, 1.2, 0.0]
-	for r in range(ROWS):
-		for c in range(COLS):
-			var cell: Dictionary = farm[r][c]
-			if not _is_cell_unlocked(cell):
-				continue
-			if cell["crop_id"] != -1 and cell["progress"] < 1.0:
-				var cid := int(cell["crop_id"])
-				var before := float(cell["progress"])
-				var gt := float(CROPS[cid][3])
-				var stage: int = _get_crop_stage_enum(before)
-				var sm: float = stage_mult[stage] if stage < 3 else 0.0
-				# 离线生长（含减速：按当前状态估算平均减速）
-				var speed_mult := 1.0
-				if int(cell.get("water_state", 0)) == 1:
-					speed_mult *= 0.85 # 离线用平均减速
-				var bc := int(cell.get("bug_count", 0))
-				if bc > 0:
-					speed_mult *= maxf(1.0 - bc * 0.10, 0.5)
-				var wc := int(cell.get("weed_count", 0))
-				if wc > 0:
-					speed_mult *= maxf(1.0 - wc * 0.05, 0.6)
-				cell["progress"] = minf(before + float(elapsed) * speed_mult / gt, 1.0)
-				if before < 1.0 and cell["progress"] >= 1.0:
-					grew_count += 1
-				# 离线事件补算
-				if cell["progress"] < 1.0 and stage < 3:
-					# 缺水
-					if int(cell.get("water_state", 0)) == 0 and _game_time >= float(cell.get("water_protect_until", 0.0)):
-						var dry_rate: float = float(CROPS[cid][9])
-						if randf() < dry_rate * elapsed_hours * sm:
-							cell["water_state"] = 1
-							event_count += 1
-					# 虫害（可多只）
-					var max_bugs: int = int(CROPS[cid][12])
-					if int(cell.get("bug_count", 0)) < max_bugs and _game_time >= float(cell.get("bug_protect_until", 0.0)):
-						var bug_rate: float = float(CROPS[cid][10])
-						var new_bugs := int(bug_rate * elapsed_hours * sm * 10.0) # 期望虫数
-						if new_bugs > 0:
-							cell["bug_count"] = clampi(int(cell.get("bug_count", 0)) + new_bugs, 0, max_bugs)
-							if cell.get("bug_since", 0.0) == 0.0:
-								cell["bug_since"] = _game_time
-							event_count += 1
-					# 杂草（可多棵）
-					var max_weeds: int = int(CROPS[cid][13])
-					if int(cell.get("weed_count", 0)) < max_weeds and _game_time >= float(cell.get("weed_protect_until", 0.0)):
-						var weed_rate: float = float(CROPS[cid][11])
-						var new_weeds := int(weed_rate * elapsed_hours * sm * 10.0)
-						if new_weeds > 0:
-							cell["weed_count"] = clampi(int(cell.get("weed_count", 0)) + new_weeds, 0, max_weeds)
-							if cell.get("weed_since", 0.0) == 0.0:
-								cell["weed_since"] = _game_time
-							event_count += 1
-				# 缺水持续时间累加
-				if int(cell.get("water_state", 0)) == 1:
-					cell["dry_timer"] = float(cell.get("dry_timer", 0.0)) + float(elapsed)
-	if grew_count > 0:
-		toast_text = "离线期间成熟了 " + str(grew_count) + " 个作物"
-		toast_timer = 3.0
-	elif event_count > 0:
-		toast_text = "离线期间出现了 " + str(event_count) + " 个打理事件，快去看看吧!"
-		toast_timer = 3.0
-
 # ===================== DRAW =====================
 func _draw():
 	if farm.is_empty():
 		return
-	_draw_world()
-
-func _draw_world():
-	# 计算当前可见的世界坐标范围（用于 tooltip 裁剪）
-	var vp: Vector2 = get_viewport().get_visible_rect().size
-	var ctrans := get_viewport().get_canvas_transform()
-	var w_min := ctrans.affine_inverse() * Vector2.ZERO
-	var w_max := ctrans.affine_inverse() * vp
-	# Title bar
-	_d_rect(Rect2(100, 40, 440, 40), Color(0.1, 0.06, 0.02, 0.85))
-	_draw_text(200, 46, "QQ 农场 2.5D", 24, Color(1, 0.9, 0.2))
-
-	# ---- ISOMETRIC TILES: PASS 1 - Soil + borders (back to front) ----
-	if farm.size() < ROWS:
-		return
-	for row in range(ROWS):
-		if farm[row].size() < COLS:
-			return
-		for col in range(COLS):
-			var sp := _get_plot_position(col, row)
-			var cx: float = sp.x
-			var cy: float = sp.y
-			var vcorners := iso_visual_corners(cx, cy)
-			var cell: Dictionary = farm[row][col]
-			_draw_land_tile(vcorners, cell)
-
-			# Hover glow (on soil layer)
-			if (col == hover_col and row == hover_row) or (ctx_menu_open and col == ctx_col and row == ctx_row):
-				if not _is_cell_unlocked(cell):
-					_d_colored_polygon(vcorners, Color(0.75, 0.75, 0.75, 0.22))
-				elif cell["crop_id"] == -1 and selected_seed >= 0:
-					_d_colored_polygon(vcorners, Color(0.3, 0.9, 0.3, 0.25))
-				elif cell["crop_id"] != -1 and cell["progress"] >= 1.0:
-					_d_colored_polygon(vcorners, Color(1.0, 0.85, 0.15, 0.35))
-				else:
-					_d_colored_polygon(vcorners, Color(1, 1, 1, 0.1))
-
-			# Border
-			if (col == hover_col and row == hover_row) or (ctx_menu_open and col == ctx_col and row == ctx_row):
-				var bcol := Color(1, 0.9, 0.2, 0.9)
-				for i in range(4):
-					_d_line(vcorners[i], vcorners[(i + 1) % 4], bcol, 2.0)
-
-			# Seed preview on empty tile
-			if _is_cell_unlocked(cell) and cell["crop_id"] == -1 and col == hover_col and row == hover_row and selected_seed >= 0:
-				var seed_texture := _get_crop_seed_texture(selected_seed)
-				if seed_texture != null:
-					_draw_seed_preview_texture(cx, cy, seed_texture)
-				else:
-					_d_circle(Vector2(cx, cy), 10, Color(CROP_COLORS[selected_seed][1].r, CROP_COLORS[selected_seed][1].g, CROP_COLORS[selected_seed][1].b, 0.7))
-					_d_circle(Vector2(cx, cy), 6, CROP_COLORS[selected_seed][1])
-
-	# ---- ISOMETRIC TILES: PASS 2 - Crops + progress bars (back to front) ----
-	for row in range(ROWS):
-		if farm[row].size() < COLS:
-			return
-		for col in range(COLS):
-			var sp := _get_plot_position(col, row)
-			var cx: float = sp.x
-			var cy: float = sp.y
-			var cell: Dictionary = farm[row][col]
-
-			if not _is_cell_unlocked(cell):
-				var req_level := _get_reclaim_level(col, row)
-				var req_cost := _get_reclaim_cost(col, row)
-				var is_next := _get_next_locked_plot().x == col and _get_next_locked_plot().y == row
-				if is_next and _sign_texture != null:
-					var can := level >= req_level and gold >= req_cost
-					var sign_color := Color(0.2, 0.8, 0.25) if can else Color(0.85, 0.25, 0.2)
-					var sign_label := "可解锁" if can else "Lv." + str(req_level) + "解锁"
-					_draw_sign(cx, cy, sign_color, sign_label, can)
-				else:
-					var lock_text := "Lv" + str(req_level)
-					var f_lock: Font = _cn_font if _cn_font != null else ThemeDB.fallback_font
-					var lock_w: float = f_lock.get_string_size(lock_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x
-					_d_rect(Rect2(cx - lock_w * 0.5 - 6, cy - 10, lock_w + 12, 18), Color(0.02, 0.02, 0.02, 0.68))
-					_draw_text(cx - lock_w * 0.5, cy - 8, lock_text, 12, Color(0.92, 0.9, 0.78, 0.95))
-					if col == hover_col and row == hover_row:
-						var cost_text := str(req_cost) + " 金币开垦"
-						var cost_w: float = f_lock.get_string_size(cost_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
-						_d_rect(Rect2(cx - cost_w * 0.5 - 6, cy + 12, cost_w + 12, 17), Color(0.02, 0.02, 0.02, 0.72))
-						_draw_text(cx - cost_w * 0.5, cy + 13, cost_text, 11, Color(1.0, 0.82, 0.26, 0.95))
-				continue
-
-			if cell["crop_id"] != -1:
-				var cid: int = int(cell["crop_id"])
-				var prog: float = cell["progress"]
-				var fruit_col: Color = CROP_COLORS[cid][1]
-				var leaf_col: Color = CROP_COLORS[cid][0]
-				var stage: int = _get_growth_stage(prog)
-				var atlas_texture: Texture2D = _get_crop_stage_texture(cid, prog)
-
-				if stage < 0:
-					_draw_plant_seed(cx, cy, prog)
-				elif atlas_texture != null:
-					_draw_crop_atlas_texture(cx, cy, atlas_texture, prog, cid, stage)
-				elif prog > 0.3:
-					_draw_plant_growing(cx, cy, leaf_col, prog)
-				else:
-					_draw_plant_seed(cx, cy, prog)
-
-				if prog >= 1.0:
-					if atlas_texture == null:
-						_draw_plant_full(cx, cy, leaf_col, fruit_col)
-					# Harvest label
-					var f: Font = _cn_font if _cn_font != null else ThemeDB.fallback_font
-					var lbl := "收获"
-					var lw: float = f.get_string_size(lbl, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
-					_d_rect(Rect2(cx - lw * 0.5 - 4, cy - TH * 0.5 - 22, lw + 8, 16), Color(0.8, 0.6, 0, 0.85))
-					_draw_text(cx - lw * 0.5, cy - TH * 0.5 - 19, lbl, 11, Color(1, 1, 1))
-
-				# Progress bar
-				if prog < 1.0:
-					var bw: float = TW * 0.5
-					var bx: float = cx - bw * 0.5
-					var by: float = cy + TH * 0.35
-					_d_rect(Rect2(bx, by, bw, 5), Color(0, 0, 0, 0.5))
-					var bc := Color(0.2, 0.8, 0.3) if prog < 0.6 else Color(0.95, 0.75, 0.1)
-					_d_rect(Rect2(bx, by, bw * prog, 5), bc)
-					# Stage name + time remaining (always visible)
-					var stage_name: String
-					var remaining: int = int((1.0 - prog) * float(CROPS[cid][3]))
-					if prog < 0.15:
-						stage_name = "种子"
-					elif prog < 0.4:
-						stage_name = "发芽"
-					elif prog < 0.7:
-						stage_name = "生长"
-					else:
-						stage_name = "快熟"
-					var info: String = stage_name + " " + str(remaining) + "秒"
-					_draw_text(cx - 20, cy + TH * 0.5 + 14, info, 9, Color(1, 1, 1, 0.75))
-				else:
-					# Mature: show yield hint
-					var yield_hint := "产量 " + str(int(CROPS[cid][5])) + "~" + str(int(CROPS[cid][8]))
-					_draw_text(cx - 20, cy + TH * 0.5 + 14, yield_hint, 9, Color(1, 0.9, 0.3, 0.8))
-
-				# 状态图标（缺水/虫/草）
-				if prog < 1.0:
-					var icon_y := cy - TH * 0.5 - 8
-					var icon_x := cx + 12
-					var ws: int = int(cell.get("water_state", 0))
-					var bc: int = int(cell.get("bug_count", 0))
-					var wc: int = int(cell.get("weed_count", 0))
-					if ws == 1: # DRY
-						_d_circle(Vector2(icon_x, icon_y), 6, Color(0.2, 0.5, 0.9, 0.8))
-						_draw_text(icon_x - 3, icon_y + 3, "渴", 8, Color(1, 1, 1))
-						icon_x -= 16
-					if bc > 0:
-						_d_circle(Vector2(icon_x, icon_y), 6, Color(0.9, 0.2, 0.2, 0.8))
-						_draw_text(icon_x - 3, icon_y + 3, str(bc), 8, Color(1, 1, 1))
-						icon_x -= 16
-					if wc > 0:
-						_d_circle(Vector2(icon_x, icon_y), 6, Color(0.2, 0.7, 0.2, 0.8))
-						_draw_text(icon_x - 3, icon_y + 3, str(wc), 8, Color(1, 1, 1))
-
-	# ---- HOVER TOOLTIP (QQ Farm style detail card) ----
-	# 弹窗打开时不显示 tooltip，避免遮挡
-	if (not shop_open and not inventory_open and not settings_open
-			and not reclaim_confirm_open and not reset_confirm_open
-			and not warehouse_open and not shovel_all_confirm_open
-			and hover_col >= 0 and hover_col < COLS and hover_row >= 0 and hover_row < ROWS):
-		var hcell: Dictionary = farm[hover_row][hover_col]
-		if not _is_cell_unlocked(hcell):
-			var hsp_locked := _get_plot_position(hover_col, hover_row)
-			var lx: float = hsp_locked.x
-			var ly: float = hsp_locked.y
-			var ltw: float = 190.0
-			var lth: float = 82.0
-			var ltx: float = clampf(lx - ltw * 0.5, w_min.x + 5, w_max.x - ltw - 5)
-			var lty: float = clampf(ly - TH * 0.5 - lth - 18, w_min.y + 5, w_max.y - lth - 5)
-			var required_level := _get_reclaim_level(hover_col, hover_row)
-			var required_cost := _get_reclaim_cost(hover_col, hover_row)
-			var next_locked := _get_next_locked_plot()
-			_d_rect(Rect2(ltx, lty, ltw, lth), Color(0.08, 0.06, 0.03, 0.94))
-			_d_rect(Rect2(ltx, lty, ltw, lth), Color(0.55, 0.42, 0.2), false, 2)
-			_d_rect(Rect2(ltx, lty, ltw, 22), Color(0.34, 0.25, 0.12))
-			_draw_text(ltx + 8, lty + 3, "未开垦土地", 13, Color(1.0, 0.92, 0.72))
-			_draw_text(ltx + 10, lty + 31, "需要等级: " + str(required_level), 12, Color(0.86, 0.92, 1.0))
-			_draw_text(ltx + 10, lty + 49, "开垦费用: " + str(required_cost) + " 金币", 12, Color(1.0, 0.84, 0.25))
-			var locked_hint := "点击开垦" if next_locked.x == hover_col and next_locked.y == hover_row and level >= required_level and gold >= required_cost else ("需先开垦前一块" if next_locked.x != hover_col or next_locked.y != hover_row else "等级或金币不足")
-			var locked_hint_color := Color(0.45, 0.95, 0.45) if next_locked.x == hover_col and next_locked.y == hover_row and level >= required_level and gold >= required_cost else (Color(0.95, 0.8, 0.35) if next_locked.x != hover_col or next_locked.y != hover_row else Color(0.95, 0.45, 0.35))
-			_draw_text(ltx + 10, lty + 66, locked_hint, 10, locked_hint_color)
-		elif hcell["crop_id"] != -1:
-			var hsp := _get_plot_position(hover_col, hover_row)
-			var hx: float = hsp.x
-			var hy: float = hsp.y
-			var hid: int = int(hcell["crop_id"])
-			var hprog: float = hcell["progress"]
-
-			# Stage info
-			var stage: String
-			var stage_color: Color
-			if hprog >= 1.0:
-				stage = "可以收获"
-				stage_color = Color(1, 0.85, 0.1)
-			elif hprog >= 0.7:
-				stage = "即将成熟"
-				stage_color = Color(0.9, 0.8, 0.2)
-			elif hprog >= 0.4:
-				stage = "生长中"
-				stage_color = Color(0.3, 0.8, 0.3)
-			elif hprog >= 0.15:
-				stage = "发芽中"
-				stage_color = Color(0.4, 0.75, 0.3)
-			else:
-				stage = "刚种下"
-				stage_color = Color(0.6, 0.6, 0.6)
-
-			var time_left: int = int((1.0 - hprog) * float(CROPS[hid][3]))
-			var pct: int = int(hprog * 100)
-
-			# Tooltip position (above the tile, clamp to screen)
-			var tw: float = 170.0
-			var th: float = 95.0
-			var tx: float = hx - tw * 0.5
-			var ty: float = hy - TH * 0.5 - th - 18
-			# Clamp to visible world area
-			tx = clampf(tx, w_min.x + 5, w_max.x - tw - 5)
-			ty = clampf(ty, w_min.y + 5, w_max.y - th - 5)
-
-			# Card background
-			_d_rect(Rect2(tx, ty, tw, th), Color(0.08, 0.05, 0.02, 0.92))
-			_d_rect(Rect2(tx, ty, tw, th), Color(0.55, 0.42, 0.2), false, 2)
-
-			# Title bar
-			_d_rect(Rect2(tx, ty, tw, 22), Color(0.4, 0.28, 0.1))
-			_draw_text(tx + 6, ty + 3, str(CROPS[hid][0]), 13, Color(1, 0.95, 0.8))
-
-			# Crop color dot
-			_d_circle(Vector2(tx + 14, ty + 36), 6, CROP_COLORS[hid][1])
-
-			# Stage
-			_draw_text(tx + 26, ty + 30, stage, 11, stage_color)
-
-			# Progress percentage
-			_draw_text(tx + 26, ty + 46, str(pct) + "% 已成长", 11, Color(0.8, 0.8, 0.8))
-			var land_info := _get_land_level_name(int(hcell.get("land_level", 1)))
-			if int(hcell.get("land_level", 1)) < LAND_LEVEL_MAX:
-				land_info += " " + str(int(hcell.get("land_work", 0))) + "/" + str(LAND_UPGRADE_WORK_REQUIRED)
-			_draw_text(tx + 92, ty + 30, land_info, 10, Color(0.95, 0.82, 0.42))
-
-			# Time / Price + action hint
-			var action_hint: String
-			if hprog >= 1.0:
-				var harvest_y := _calc_harvest_yield(hcell, hid)
-				_draw_text(tx + 26, ty + 62, "可收获: " + str(harvest_y) + "个 × " + str(int(CROPS[hid][6])) + "金", 11, Color(1, 0.88, 0.15))
-				if tool_mode == 3:
-					action_hint = "点击收获!"
-				elif tool_mode == 4:
-					action_hint = "点击铲除作物"
-				else:
-					action_hint = "切换到收获模式"
-			else:
-				_draw_text(tx + 26, ty + 62, "剩余时间: " + str(time_left) + "秒", 11, Color(0.7, 0.8, 1.0))
-				var hws: int = int(hcell.get("water_state", 0))
-				var hbc: int = int(hcell.get("bug_count", 0))
-				var hwc: int = int(hcell.get("weed_count", 0))
-				if tool_mode == 1:
-					action_hint = "点击浇水" if hws == 1 else "当前不需要浇水"
-				elif tool_mode == 2:
-					action_hint = "点击施肥" if selected_fertilizer >= 0 else "请先购买肥料"
-				elif tool_mode == 6:
-					action_hint = "点击除虫 (剩余" + str(hbc) + "只)" if hbc > 0 else "这里没有虫害"
-				elif tool_mode == 7:
-					action_hint = "点击除草 (剩余" + str(hwc) + "棵)" if hwc > 0 else "这里没有杂草"
-				elif tool_mode == 4:
-					action_hint = "点击铲除作物"
-				else:
-					action_hint = "切换到打理工具"
-			var hint_color := Color(0.4, 0.9, 0.4) if hprog >= 1.0 else Color(0.4, 0.7, 0.9)
-			_draw_text(tx + 26, ty + 76, action_hint, 10, hint_color)
-
-			# Small arrow pointing down to tile
-			var arrow_x: float = clampf(hx, tx + 10, tx + tw - 10)
-			var arrow_pts: PackedVector2Array = PackedVector2Array([
-				Vector2(arrow_x - 6, ty + th),
-				Vector2(arrow_x, ty + th + 8),
-				Vector2(arrow_x + 6, ty + th),
-			])
-			_d_colored_polygon(arrow_pts, Color(0.08, 0.05, 0.02, 0.92))
-		else:
-			_draw_land_tooltip(hover_col, hover_row)
+	FarmRenderer.draw_world(self)
 
 # ---- 以下 UI 固定在屏幕上，不受 Camera 影响 ----
 # 被 UIOverlay._draw() 调用，caller 是 UIOverlay 节点（CanvasLayer 子节点）
-func _draw_ui(caller: CanvasItem):
+func _draw_modal_ui(caller: CanvasItem):
 	_ui_draw_target = caller
 	var vp: Vector2 = get_viewport().get_visible_rect().size
-	# ---- TOOL BAR (地块下方图标按钮) ----
-	var tb_names := ["普通", "浇水", "施肥", "收获", "铲除", "全铲", "除虫", "除草", "全收", "仓库"]
-	var tb_colors := [
-		Color(0.5, 0.47, 0.42), Color(0.22, 0.52, 0.88), Color(0.78, 0.58, 0.12),
-		Color(0.22, 0.72, 0.32), Color(0.64, 0.38, 0.22), Color(0.64, 0.38, 0.22),
-		Color(0.75, 0.22, 0.22), Color(0.22, 0.72, 0.32), Color(0.78, 0.58, 0.12),
-		Color(0.4, 0.42, 0.5),
-	]
-	var tb_dark := [
-		Color(0.35, 0.32, 0.28), Color(0.14, 0.38, 0.68), Color(0.58, 0.4, 0.06),
-		Color(0.14, 0.52, 0.2), Color(0.42, 0.24, 0.14), Color(0.42, 0.24, 0.14),
-		Color(0.52, 0.14, 0.14), Color(0.14, 0.52, 0.2), Color(0.58, 0.4, 0.06),
-		Color(0.28, 0.3, 0.36),
-	]
-	var btn_size: float = 58.0
-	var btn_gap: float = 8.0
-	var tb_total: float = 10.0 * btn_size + 9.0 * btn_gap
-	var tb_start_x: float = vp.x * 0.5 - tb_total * 0.5
-	var tb_y: float = vp.y * 0.8
-
-	if TOOLBAR_BG_TEXTURE != null:
-		var bg_w: float = tb_total + 140.0
-		var bg_h: float = btn_size + 80.0
-		var bg_rect := Rect2(tb_start_x - 70.0, tb_y - 30.0, bg_w, bg_h)
-		
-		var tex_size := TOOLBAR_BG_TEXTURE.get_size()
-		var left_m := 80.0
-		var right_m := 80.0
-		var scale_y := bg_h / maxf(tex_size.y, 1.0)
-		var draw_l := left_m * scale_y
-		var draw_r := right_m * scale_y
-		
-		_ui_draw_target.draw_texture_rect_region(TOOLBAR_BG_TEXTURE, Rect2(bg_rect.position.x, bg_rect.position.y, draw_l, bg_h), Rect2(0, 0, left_m, tex_size.y))
-		_ui_draw_target.draw_texture_rect_region(TOOLBAR_BG_TEXTURE, Rect2(bg_rect.position.x + draw_l, bg_rect.position.y, bg_rect.size.x - draw_l - draw_r, bg_h), Rect2(left_m, 0, tex_size.x - left_m - right_m, tex_size.y))
-		_ui_draw_target.draw_texture_rect_region(TOOLBAR_BG_TEXTURE, Rect2(bg_rect.position.x + bg_rect.size.x - draw_r, bg_rect.position.y, draw_r, bg_h), Rect2(tex_size.x - right_m, 0, right_m, tex_size.y))
-
-	for ti in range(10):
-		var bx: float = tb_start_x + ti * (btn_size + btn_gap)
-		var by: float = tb_y
-
-		var is_active: bool = (tool_mode == ti)
-
-		# ---- Draw icon in each button ----
-		var icon_cx: float = bx + btn_size * 0.5
-		var icon_cy: float = by + btn_size * 0.35
-		var icon_texture: Texture2D = TOOL_ICON_TEXTURES[ti]
-		if icon_texture != null:
-			var icon_grow := 4.0 if is_active else 0.0
-			var icon_rect := Rect2(bx - icon_grow * 0.5, by - icon_grow * 0.5, btn_size + icon_grow, btn_size + icon_grow)
-			if is_active:
-				_d_circle(Vector2(icon_cx, by + btn_size * 0.48), 38.0, Color(1.0, 0.86, 0.22, 0.18))
-				_d_circle(Vector2(icon_cx, by + btn_size * 0.48), 30.0, Color(1.0, 0.96, 0.42, 0.10))
-			_d_texture_rect(icon_texture, icon_rect, false)
-			var txt_col: Color = Color(1.0, 0.92, 0.34, 0.98) if is_active else Color(0.78, 0.78, 0.78)
-			var label_w: float = (_cn_font if _cn_font != null else ThemeDB.fallback_font).get_string_size(tb_names[ti], HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x
-			_draw_text(icon_cx - label_w * 0.5, by + btn_size + 1.0, tb_names[ti], 12, txt_col)
-			if is_active:
-				_d_line(Vector2(icon_cx - 15.0, by + btn_size + 17.0), Vector2(icon_cx + 15.0, by + btn_size + 17.0), Color(1.0, 0.86, 0.22, 0.95), 3.0)
-			continue
-
-		if ti == 0:
-			# 普通 - 鼠标箭头
-			var arrow: PackedVector2Array = PackedVector2Array([
-				Vector2(icon_cx - 6, icon_cy - 10),
-				Vector2(icon_cx - 6, icon_cy + 8),
-				Vector2(icon_cx - 1, icon_cy + 4),
-				Vector2(icon_cx + 4, icon_cy + 10),
-				Vector2(icon_cx + 7, icon_cy + 8),
-				Vector2(icon_cx + 2, icon_cy + 2),
-				Vector2(icon_cx + 8, icon_cy - 2),
-			])
-			_d_colored_polygon(arrow, Color(1, 1, 1, 0.9))
-
-		elif ti == 1:
-			# 浇水 - 水壶
-			_d_rect(Rect2(icon_cx - 8, icon_cy - 4, 16, 10), Color(0.6, 0.75, 0.9))
-			_d_rect(Rect2(icon_cx - 8, icon_cy - 4, 16, 10), Color(0.3, 0.5, 0.8), false, 1.5)
-			# 壶嘴
-			_d_line(Vector2(icon_cx + 8, icon_cy - 4), Vector2(icon_cx + 14, icon_cy - 10), Color(0.3, 0.5, 0.8), 2.0)
-			# 水滴
-			_d_circle(Vector2(icon_cx + 10, icon_cy - 14), 2.5, Color(0.3, 0.6, 1.0))
-			_d_circle(Vector2(icon_cx + 5, icon_cy - 16), 2.0, Color(0.3, 0.6, 1.0))
-			# 把手
-			_d_arc(Vector2(icon_cx - 2, icon_cy - 8), 6, 0, PI, 12, Color(0.3, 0.5, 0.8), 2.0)
-
-		elif ti == 2:
-			# 施肥 - 袋子
-			var bag_body: PackedVector2Array = PackedVector2Array([
-				Vector2(icon_cx - 11, icon_cy - 7),
-				Vector2(icon_cx + 11, icon_cy - 7),
-				Vector2(icon_cx + 9, icon_cy + 12),
-				Vector2(icon_cx - 9, icon_cy + 12),
-			])
-			_d_colored_polygon(bag_body, Color(0.68, 0.52, 0.23))
-			for bi in range(4):
-				_d_line(bag_body[bi], bag_body[(bi + 1) % 4], Color(0.42, 0.28, 0.08), 1.5)
-			_d_line(Vector2(icon_cx - 6, icon_cy - 8), Vector2(icon_cx + 6, icon_cy - 8), Color(0.32, 0.22, 0.08), 2.0)
-			_draw_text(icon_cx - 6, icon_cy - 2, "肥", 11, Color(1, 0.92, 0.55))
-			_d_circle(Vector2(icon_cx - 15, icon_cy + 12), 2.0, Color(0.9, 0.75, 0.25))
-			_d_circle(Vector2(icon_cx + 14, icon_cy + 10), 1.8, Color(0.9, 0.75, 0.25))
-
-		elif ti == 3:
-			# 收获 - 篮子
-			# 篮身 (梯形)
-			var basket: PackedVector2Array = PackedVector2Array([
-				Vector2(icon_cx - 10, icon_cy - 4),
-				Vector2(icon_cx + 10, icon_cy - 4),
-				Vector2(icon_cx + 8, icon_cy + 8),
-				Vector2(icon_cx - 8, icon_cy + 8),
-			])
-			_d_colored_polygon(basket, Color(0.7, 0.55, 0.25))
-			# 提手
-			_d_arc(Vector2(icon_cx, icon_cy - 10), 8, PI, TAU, 12, Color(0.45, 0.32, 0.1), 2.0)
-			# 里面的小果子
-			_d_circle(Vector2(icon_cx - 3, icon_cy), 2.5, Color(0.9, 0.2, 0.15))
-			_d_circle(Vector2(icon_cx + 3, icon_cy - 1), 2.5, Color(1.0, 0.6, 0.1))
-			_d_circle(Vector2(icon_cx, icon_cy - 5), 2.4, Color(0.95, 0.92, 0.2))
-
-		elif ti == 4:
-			# 铲除 - 铲子
-			_d_line(Vector2(icon_cx + 8, icon_cy - 16), Vector2(icon_cx - 8, icon_cy + 7), Color(0.92, 0.74, 0.42), 4.0)
-			_d_line(Vector2(icon_cx + 8, icon_cy - 16), Vector2(icon_cx - 8, icon_cy + 7), Color(0.42, 0.24, 0.12), 1.2)
-			var blade: PackedVector2Array = PackedVector2Array([
-				Vector2(icon_cx - 14, icon_cy + 7),
-				Vector2(icon_cx - 3, icon_cy + 2),
-				Vector2(icon_cx + 3, icon_cy + 12),
-				Vector2(icon_cx - 5, icon_cy + 19),
-			])
-			_d_colored_polygon(blade, Color(0.78, 0.84, 0.86))
-			for si in range(4):
-				_d_line(blade[si], blade[(si + 1) % 4], Color(0.38, 0.42, 0.44), 1.4)
-			_d_line(Vector2(icon_cx + 5, icon_cy - 19), Vector2(icon_cx + 16, icon_cy - 13), Color(0.42, 0.24, 0.12), 3.0)
-
-		# Tool name below icon
-		var txt_col: Color = Color(1, 1, 1, 0.95) if is_active else Color(0.7, 0.7, 0.7)
-		_draw_text(bx + 14, by + btn_size - 6, tb_names[ti], 12, txt_col)
-
-	# ---- TOP HUD (left) ----
-	_d_rect(Rect2(8, 6, 280, 48), Color(0.08, 0.06, 0.02, 0.82))
-	_d_rect(Rect2(8, 6, 280, 48), Color(0.45, 0.35, 0.15), false, 2)
-	_draw_text(18, 10, "金币: " + str(gold), 18, Color(1, 0.88, 0.15))
-	_draw_text(150, 12, "Lv." + str(level), 16, Color(0.8, 0.9, 1.0))
-	# Exp bar
-	_d_rect(Rect2(18, 34, 180, 10), Color(0.1, 0.1, 0.15))
-	var ep: float = float(exp_val) / float(exp_to_level) if exp_to_level > 0 else 0.0
-	_d_rect(Rect2(18, 34, 180.0 * ep, 10), Color(0.25, 0.5, 1.0))
-	_draw_text(202, 32, str(exp_val) + "/" + str(exp_to_level), 10, Color(0.65, 0.75, 1))
-	# Land count
-	var unlocked_count := _get_unlocked_plot_count()
-	_draw_text(150, 32, "地:" + str(unlocked_count) + "/30", 10, Color(0.7, 0.65, 0.5))
-
-	if reclaim_confirm_open:
-		_draw_reclaim_confirm()
-
-	if shovel_all_confirm_open:
-		_draw_shovel_all_confirm()
-
-	if reset_confirm_open:
-		_draw_reset_confirm()
-
-	if toast_text != "":
-		var alpha := minf(toast_timer, 1.0)
-		var f: Font = _cn_font if _cn_font != null else ThemeDB.fallback_font
-		var tw: float = f.get_string_size(toast_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 20).x + 50
-		var tx: float = (vp.x - tw) * 0.5
-		_d_rect(Rect2(tx, vp.y - 50, tw, 38), Color(0, 0, 0, 0.8 * alpha))
-		_draw_text(tx + 25, vp.y - 43, toast_text, 18, Color(1, 1, 1, alpha))
 
 	_draw_context_menu_overlay(vp)
-	_draw_input_debug_overlay(vp)
 
 	_ui_draw_target = null
 
@@ -2395,146 +1534,6 @@ func _draw_context_menu_overlay(vp: Vector2):
 			var idraw_sz = isz * iscale
 			var idraw_pos = Vector2(ix + 25 - idraw_sz.x * 0.5, iy + 25 - idraw_sz.y * 0.5)
 			_d_texture_rect(item["icon"], Rect2(idraw_pos, idraw_sz), false)
-
-func _draw_input_debug_overlay(vp: Vector2):
-	var marker := _debug_last_input_viewport
-	if marker == Vector2.ZERO and _debug_last_input_raw == Vector2.ZERO:
-		return
-
-	var debug_x := 18.0
-	var debug_y := vp.y - 78.0
-	_d_rect(Rect2(debug_x, debug_y, 200, 64), Color(0.04, 0.04, 0.04, 0.7))
-	_draw_text(debug_x + 6, debug_y + 6, "vp=" + str(_debug_last_input_viewport), 9, Color(1, 1, 1))
-	_draw_text(debug_x + 6, debug_y + 20, "world=" + str(_debug_last_input_world), 9, Color(1, 1, 1))
-	_draw_text(debug_x + 6, debug_y + 34, "tool=" + str(_debug_last_toolbar_hit), 9, Color(1, 0.9, 0.3))
-	_draw_text(debug_x + 6, debug_y + 48, "tile=" + str(_debug_last_tile_hit), 9, Color(0.5, 1.0, 0.5))
-
-	if _debug_last_toolbar_hit >= 0:
-		var btn_size: float = 58.0
-		var btn_gap: float = 8.0
-		var tb_total: float = 10.0 * btn_size + 9.0 * btn_gap
-		var tb_start_x: float = vp.x * 0.5 - tb_total * 0.5
-		var tb_y: float = vp.y * 0.8
-		var bx: float = tb_start_x + _debug_last_toolbar_hit * (btn_size + btn_gap)
-		_d_rect(Rect2(bx, tb_y, btn_size, btn_size), Color(1.0, 0.25, 0.25, 0.0), false, 3.0)
-
-	if _debug_last_tile_hit.x >= 0 and _debug_last_tile_hit.y >= 0:
-		var sp := _get_plot_position(_debug_last_tile_hit.x, _debug_last_tile_hit.y)
-		var corners := iso_visual_corners(sp.x, sp.y)
-		# 世界坐标 → 屏幕坐标（CanvasLayer 绘制在屏幕坐标系）
-		var ct := get_viewport().get_canvas_transform()
-		for i in range(corners.size()):
-			var a: Vector2 = ct * corners[i]
-			var b: Vector2 = ct * corners[(i + 1) % corners.size()]
-			_d_line(a, b, Color(0.2, 1.0, 0.2, 0.95), 3.0)
-
-func _draw_reclaim_confirm():
-	var rect := _get_reclaim_confirm_rect()
-	var col := reclaim_confirm_col
-	var row := reclaim_confirm_row
-	if col < 0 or row < 0:
-		return
-	var required_level := _get_reclaim_level(col, row)
-	var required_cost := _get_reclaim_cost(col, row)
-	var plot_no := _get_plot_index(col, row) + 1
-	var vp: Vector2 = get_viewport().get_visible_rect().size
-	_d_rect(Rect2(0, 0, vp.x, vp.y), Color(0, 0, 0, 0.62))
-	_d_rect(rect, Color(0.94, 0.9, 0.78))
-	_d_rect(rect, Color(0.48, 0.32, 0.12), false, 4)
-	_d_rect(Rect2(rect.position.x, rect.position.y, rect.size.x, 30), Color(0.42, 0.28, 0.08))
-	_draw_text(rect.position.x + 116, rect.position.y + 5, "确认开垦土地", 18, Color(1, 0.95, 0.82))
-	_draw_text(rect.position.x + 30, rect.position.y + 50, "第 " + str(plot_no) + " 块地", 16, Color(0.18, 0.14, 0.1))
-	_draw_text(rect.position.x + 30, rect.position.y + 76, "需要等级: " + str(required_level), 14, Color(0.2, 0.24, 0.42))
-	_draw_text(rect.position.x + 30, rect.position.y + 102, "开垦费用: " + str(required_cost) + " 金币", 14, Color(0.75, 0.3, 0.05))
-	_draw_text(rect.position.x + 30, rect.position.y + 128, "确认花费金币开垦这块土地吗？", 14, Color(0.28, 0.22, 0.18))
-	var cancel_rect := Rect2(rect.position.x + 40, rect.position.y + 145, 130, 34)
-	var confirm_rect := Rect2(rect.position.x + rect.size.x - 170, rect.position.y + 145, 130, 34)
-	_d_rect(cancel_rect, Color(0.55, 0.42, 0.28))
-	_d_rect(confirm_rect, Color(0.22, 0.62, 0.28))
-	_draw_text(cancel_rect.position.x + 44, cancel_rect.position.y + 7, "取消", 16, Color(1, 1, 1))
-	_draw_text(confirm_rect.position.x + 44, confirm_rect.position.y + 7, "确认", 16, Color(1, 1, 1))
-
-func _draw_reset_confirm():
-	var rect := _get_reset_confirm_rect()
-	var vp: Vector2 = get_viewport().get_visible_rect().size
-	_d_rect(Rect2(0, 0, vp.x, vp.y), Color(0, 0, 0, 0.68))
-	_d_rect(rect, Color(0.9, 0.86, 0.94))
-	_d_rect(rect, Color(0.4, 0.18, 0.45), false, 4)
-	_d_rect(Rect2(rect.position.x, rect.position.y, rect.size.x, 30), Color(0.35, 0.15, 0.4))
-	_draw_text(rect.position.x + 142, rect.position.y + 5, "确认重置农场", 18, Color(1, 0.92, 0.98))
-	_draw_text(rect.position.x + 28, rect.position.y + 52, "这会清空当前存档中的金币、等级、土地、作物和背包数据。", 14, Color(0.22, 0.12, 0.3))
-	_draw_text(rect.position.x + 28, rect.position.y + 80, "重置后会立即覆盖旧存档，重新进入游戏也不会恢复。", 14, Color(0.45, 0.2, 0.3))
-	_draw_text(rect.position.x + 28, rect.position.y + 112, "确认要新开档吗？", 15, Color(0.55, 0.18, 0.18))
-	var cancel_rect := Rect2(rect.position.x + 50, rect.position.y + 165, 150, 36)
-	var confirm_rect := Rect2(rect.position.x + rect.size.x - 200, rect.position.y + 165, 150, 36)
-	_d_rect(cancel_rect, Color(0.55, 0.42, 0.55))
-	_d_rect(confirm_rect, Color(0.75, 0.22, 0.18))
-	_draw_text(cancel_rect.position.x + 52, cancel_rect.position.y + 8, "取消", 16, Color(1, 1, 1))
-	_draw_text(confirm_rect.position.x + 34, confirm_rect.position.y + 8, "确认重置", 16, Color(1, 1, 1))
-
-
-func _draw_shovel_all_confirm():
-	var vp: Vector2 = get_viewport().get_visible_rect().size
-	var rect := Rect2(vp.x * 0.5 - 200, vp.y * 0.5 - 80, 400, 160)
-	_d_rect(Rect2(0, 0, vp.x, vp.y), Color(0, 0, 0, 0.62))
-	_d_rect(rect, Color(0.94, 0.9, 0.78))
-	_d_rect(rect, Color(0.48, 0.32, 0.12), false, 4)
-	_d_rect(Rect2(rect.position.x, rect.position.y, rect.size.x, 30), Color(0.55, 0.24, 0.14))
-	_draw_text(rect.position.x + 120, rect.position.y + 5, "确认铲除全部作物?", 18, Color(1, 0.95, 0.82))
-	_draw_text(rect.position.x + 30, rect.position.y + 50, "这将铲除所有地块上的作物，且不可恢复。", 14, Color(0.28, 0.22, 0.18))
-	var cancel_rect := Rect2(rect.position.x + 40, rect.position.y + 110, 130, 30)
-	var confirm_rect := Rect2(rect.position.x + rect.size.x - 170, rect.position.y + 110, 130, 30)
-	_d_rect(cancel_rect, Color(0.55, 0.42, 0.28))
-	_d_rect(confirm_rect, Color(0.75, 0.22, 0.18))
-	_draw_text(cancel_rect.position.x + 44, cancel_rect.position.y + 4, "取消", 16, Color(1, 1, 1))
-	_draw_text(confirm_rect.position.x + 44, confirm_rect.position.y + 4, "确认铲除", 16, Color(1, 1, 1))
-
-func _draw_warehouse_overlay():
-	var vp: Vector2 = get_viewport().get_visible_rect().size
-	var ww := 360.0; var wh := 300.0
-	var wx := (vp.x - ww) / 2; var wy := (vp.y - wh) / 2
-	_d_rect(Rect2(0, 0, vp.x, vp.y), Color(0, 0, 0, 0.55))
-	_d_rect(Rect2(wx, wy, ww, wh), Color(0.16, 0.14, 0.11))
-	_d_rect(Rect2(wx, wy, ww, wh), Color(0.45, 0.38, 0.22), false, 3)
-	_d_rect(Rect2(wx, wy, ww, 36), Color(0.3, 0.26, 0.16))
-	_draw_text(wx + 140, wy + 8, "仓库", 20, Color(1, 0.92, 0.75))
-	_draw_text(wx + ww - 80, wy + 10, "点外部关闭", 12, Color(0.6, 0.55, 0.4))
-	var keys = inventory.keys()
-	var item_count := 0
-	var iy := wy + 48
-	for cid in keys:
-		if inventory.has(cid) and inventory[cid] > 0:
-			_draw_text(wx + 20, iy, str(CROPS[int(cid)][0]) + " x" + str(inventory[cid]), 14, Color(0.8, 0.75, 0.6))
-			iy += 24
-			item_count += 1
-	if item_count == 0:
-		_draw_text(wx + 120, wy + 120, "仓库是空的", 18, Color(0.5, 0.45, 0.35))
-func _draw_settings_overlay():
-	var vp: Vector2 = get_viewport().get_visible_rect().size
-	var sw := 360.0; var sh := 280.0
-	var sx := (vp.x - sw) / 2; var sy := (vp.y - sh) / 2
-	_d_rect(Rect2(0, 0, vp.x, vp.y), Color(0, 0, 0, 0.55))
-	_d_rect(Rect2(sx, sy, sw, sh), Color(0.16, 0.14, 0.11))
-	_d_rect(Rect2(sx, sy, sw, sh), Color(0.45, 0.38, 0.22), false, 3)
-	# Title bar
-	_d_rect(Rect2(sx, sy, sw, 36), Color(0.3, 0.26, 0.16))
-	_draw_text(sx + 140, sy + 8, "设置", 20, Color(1, 0.92, 0.75))
-	# Close hint
-	_draw_text(sx + sw - 80, sy + 10, "点外部关闭", 12, Color(0.6, 0.55, 0.4))
-	# 退出登录 button
-	var btn_w := 260.0; var btn_h := 38.0
-	var bx := sx + (sw - btn_w) / 2
-	_d_rect(Rect2(bx, sy + 80, btn_w, btn_h), Color(0.3, 0.45, 0.65))
-	_draw_text(bx + 80, sy + 88, "退出登录", 18, Color(1, 1, 1))
-	# 重置农场 button
-	_d_rect(Rect2(bx, sy + 140, btn_w, btn_h), Color(0.72, 0.24, 0.2))
-	_draw_text(bx + 68, sy + 148, "重置农场/新开档", 18, Color(1, 1, 1))
-	# Warning text
-	_draw_text(bx + 8, sy + 200, "重置会清空所有游戏数据，不可恢复", 12, Color(0.65, 0.4, 0.35))
-	# Token info
-	if not auth_token.is_empty():
-		var uname: String = user_info.get("username", "???")
-		_draw_text(bx + 8, sy + 240, "当前账号: " + uname, 13, Color(0.55, 0.55, 0.5))
 
 # ---- SIGN DRAWING ----
 func _draw_sign(cx: float, cy: float, sign_color: Color, label: String, can_open: bool):
@@ -2723,13 +1722,15 @@ func _get_crop_mature_texture(cid: int) -> Texture2D:
 	return CropAtlas.get_stage_texture(str(CROPS[cid][4]), 3)
 
 func _get_growth_stage(prog: float) -> int:
-	if prog < 0.18:
+	if RENDER_STAGE_THRESHOLDS.size() < 4:
+		return 2 if prog >= 0.9 else -1
+	if prog < float(RENDER_STAGE_THRESHOLDS[0]):
 		return -1
-	if prog < 0.45:
+	if prog < float(RENDER_STAGE_THRESHOLDS[1]):
 		return 0
-	if prog < 0.72:
+	if prog < float(RENDER_STAGE_THRESHOLDS[2]):
 		return 1
-	if prog < 0.9:
+	if prog < float(RENDER_STAGE_THRESHOLDS[3]):
 		return 2
 	return 2
 
