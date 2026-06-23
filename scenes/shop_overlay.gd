@@ -5,6 +5,8 @@ extends Control
 var CROPS: Array = []
 var CROP_COLORS: Array = []
 var FERTILIZERS: Array = []
+var crop_catalog: CropCatalog = null
+var fertilizer_catalog: FertilizerCatalog = null
 var inventory: Dictionary = {}:
 	set(v):
 		inventory = v
@@ -117,23 +119,21 @@ func _build_seed_tab() -> Control:
 	return root
 
 func _add_seed_row(grid: GridContainer, i: int):
-	var c: Array = CROPS[i]
 	# 名称 + 色点
 	var name_box := HBoxContainer.new()
 	name_box.add_theme_constant_override("separation", 6)
 	var dot := ColorRect.new()
 	dot.custom_minimum_size = Vector2(16, 16)
 	dot.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	if CROP_COLORS.size() > i:
-		dot.color = CROP_COLORS[i][1]
+	dot.color = _crop_color(i, 1)
 	name_box.add_child(dot)
-	name_box.add_child(UIKit.make_label(str(c[0]), 15, Color(0.08, 0.08, 0.08)))
+	name_box.add_child(UIKit.make_label(_crop_name(i), 15, Color(0.08, 0.08, 0.08)))
 	grid.add_child(name_box)
 
-	grid.add_child(UIKit.make_label(str(int(c[1])) + " 金", 13, Color(0.75, 0.25, 0.08)))
-	grid.add_child(UIKit.make_label(str(int(c[5])) + "x" + str(int(c[6])), 13, Color(0.08, 0.55, 0.08)))
-	grid.add_child(UIKit.make_label(str(int(c[3])) + "秒", 13, Color(0.18, 0.18, 0.5)))
-	var profit: int = int(c[5]) * int(c[6]) - int(c[1])
+	grid.add_child(UIKit.make_label(str(_crop_seed_cost(i)) + " 金", 13, Color(0.75, 0.25, 0.08)))
+	grid.add_child(UIKit.make_label(str(_crop_base_yield(i)) + "x" + str(_crop_unit_sell(i)), 13, Color(0.08, 0.55, 0.08)))
+	grid.add_child(UIKit.make_label(str(int(_crop_grow_time(i))) + "秒", 13, Color(0.18, 0.18, 0.5)))
+	var profit: int = _crop_base_yield(i) * _crop_unit_sell(i) - _crop_seed_cost(i)
 	grid.add_child(UIKit.make_label("+" + str(profit), 14, Color(0, 0.55, 0)))
 
 	# 操作按钮
@@ -169,14 +169,13 @@ func _make_seed_chip(i: int) -> PanelContainer:
 	var dot := ColorRect.new()
 	dot.custom_minimum_size = Vector2(18, 18)
 	dot.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	if CROP_COLORS.size() > i:
-		dot.color = CROP_COLORS[i][1]
+	dot.color = _crop_color(i, 1)
 	hb.add_child(dot)
 	var vb := VBoxContainer.new()
 	vb.add_theme_constant_override("separation", 0)
 	hb.add_child(vb)
-	vb.add_child(UIKit.make_label(str(CROPS[i][0]), 15, Color(0.1, 0.1, 0.1)))
-	vb.add_child(UIKit.make_label(str(int(CROPS[i][1])) + "金", 11, Color(0.4, 0.35, 0.2)))
+	vb.add_child(UIKit.make_label(_crop_name(i), 15, Color(0.1, 0.1, 0.1)))
+	vb.add_child(UIKit.make_label(str(_crop_seed_cost(i)) + "金", 11, Color(0.4, 0.35, 0.2)))
 	return chip
 
 func _build_fert_tab() -> Control:
@@ -192,7 +191,6 @@ func _build_fert_tab() -> Control:
 	return scroll
 
 func _make_fert_row(i: int) -> PanelContainer:
-	var f: Array = FERTILIZERS[i]
 	var row := PanelContainer.new()
 	row.add_theme_stylebox_override("panel", UIKit.card_box(
 		Color(0.85, 0.92, 0.81) if i % 2 == 0 else Color(0.9, 0.95, 0.86),
@@ -214,8 +212,8 @@ func _make_fert_row(i: int) -> PanelContainer:
 	var top := HBoxContainer.new()
 	top.add_theme_constant_override("separation", 10)
 	info.add_child(top)
-	top.add_child(UIKit.make_label(str(f[0]), 15, Color(0.08, 0.08, 0.08)))
-	top.add_child(UIKit.make_label(str(int(f[1])) + "金", 13, Color(0.75, 0.25, 0.08)))
+	top.add_child(UIKit.make_label(_fertilizer_name(i), 15, Color(0.08, 0.08, 0.08)))
+	top.add_child(UIKit.make_label(str(_fertilizer_cost(i)) + "金", 13, Color(0.75, 0.25, 0.08)))
 	top.add_child(UIKit.make_label(FERT_DESC[i] if i < FERT_DESC.size() else "", 12, Color(0.25, 0.3, 0.2)))
 	var have_lbl := UIKit.make_label("", 11, Color(0.4, 0.5, 0.35))
 	info.add_child(have_lbl)
@@ -244,3 +242,31 @@ func _refresh_dynamic():
 		var h := int(fertilizer_inventory.get(i, 0))
 		var hint := "  [已选中]" if selected_fertilizer == i else ""
 		lbl.text = "已有: " + str(h) + " 个" + hint
+
+func _crop_name(i: int) -> String:
+	return crop_catalog.get_name(i) if crop_catalog != null else (str(CROPS[i][0]) if i >= 0 and CROPS.size() > i else "作物" + str(i))
+
+func _crop_seed_cost(i: int) -> int:
+	return crop_catalog.get_seed_cost(i) if crop_catalog != null else (int(CROPS[i][1]) if i >= 0 and CROPS.size() > i else 0)
+
+func _crop_base_yield(i: int) -> int:
+	return crop_catalog.get_base_yield(i) if crop_catalog != null else (int(CROPS[i][5]) if i >= 0 and CROPS.size() > i else 0)
+
+func _crop_unit_sell(i: int) -> int:
+	return crop_catalog.get_unit_sell(i) if crop_catalog != null else (int(CROPS[i][6]) if i >= 0 and CROPS.size() > i else 0)
+
+func _crop_grow_time(i: int) -> float:
+	return crop_catalog.get_grow_time(i) if crop_catalog != null else (float(CROPS[i][3]) if i >= 0 and CROPS.size() > i else 0.0)
+
+func _crop_color(i: int, color_index: int) -> Color:
+	if i >= 0 and i < CROP_COLORS.size():
+		var colors = CROP_COLORS[i]
+		if colors is Array and color_index >= 0 and color_index < colors.size():
+			return colors[color_index]
+	return Color(0.42, 0.76, 0.34) if color_index == 0 else Color(0.72, 0.96, 0.46)
+
+func _fertilizer_name(i: int) -> String:
+	return fertilizer_catalog.get_name(i) if fertilizer_catalog != null else (str(FERTILIZERS[i][0]) if i >= 0 and FERTILIZERS.size() > i else "肥料" + str(i))
+
+func _fertilizer_cost(i: int) -> int:
+	return fertilizer_catalog.get_cost(i) if fertilizer_catalog != null else (int(FERTILIZERS[i][1]) if i >= 0 and FERTILIZERS.size() > i else 0)

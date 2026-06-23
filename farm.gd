@@ -1,9 +1,14 @@
 extends Node2D
 
 const CropAtlas = preload("res://scripts/crop_atlas.gd")
-const FarmApi = preload("res://scenes/farm_api.gd")
+const CropCatalogScript = preload("res://scripts/farm/crop_catalog.gd")
+const FertilizerCatalogScript = preload("res://scripts/farm/fertilizer_catalog.gd")
+const FarmRules = preload("res://scripts/farm/farm_rules.gd")
+const FarmStateScript = preload("res://scripts/farm/farm_state.gd")
+const FarmApiClientScript = preload("res://scenes/farm_api.gd")
 const CameraController = preload("res://scenes/camera_controller.gd")
 const FarmRenderer = preload("res://scenes/farm_renderer.gd")
+const DEFAULT_CATALOG_PATH := "res://resources/farm/default_catalog.tres"
 const TOOL_ICON_TEXTURES: Array[Texture2D] = [
 	null,
 	preload("res://assets/ui/icons/tool_water.png"),
@@ -48,7 +53,9 @@ const COLS := 6
 const ROWS := 5
 const OX := 500.0
 const OY := 320.0
-const PLOT_ANCHORS_PATH := "PlotAnchors"
+const WORLD_ROOT_PATH := "WorldRoot"
+const SYSTEMS_PATH := "Systems"
+const PLOT_ANCHORS_PATH := "WorldRoot/PlotAnchors"
 const INITIAL_UNLOCKED_PLOTS := 1
 const BASE_RECLAIM_COST := 60
 const RECLAIM_COST_STEP := 35
@@ -59,6 +66,9 @@ const LAND_UPGRADE_WORK_REQUIRED := 30
 var CROPS: Array = []
 var CROP_COLORS: Array = []
 var RENDER_STAGE_THRESHOLDS: Array = [0.18, 0.45, 0.72, 0.90]
+var crop_catalog: CropCatalog = CropCatalogScript.new()
+var fertilizer_catalog: FertilizerCatalog = FertilizerCatalogScript.new()
+var state: FarmState = FarmStateScript.new(COLS, ROWS)
 
 var gold := 200
 var level := 1
@@ -96,7 +106,7 @@ var _game_time := 0.0 # 游戏内累计秒数，用于保护期判断
 # Auth state (set from Login scene)
 var auth_token := ""
 var user_info := {}
-var farm_api: Node
+var farm_api: FarmApiClient
 var camera_controller: Node
 var _save_pending := false # 云端保存中
 var _config_loaded := false
@@ -159,23 +169,27 @@ func _ready():
 		auth_token = str(get_tree().get_meta("auth_token"))
 		user_info = get_tree().get_meta("user_info") if get_tree().has_meta("user_info") else {}
 
-	farm_api = FarmApi.new()
+	farm_api = FarmApiClientScript.new()
+	farm_api.name = "FarmApiClient"
 	farm_api.auth_token = auth_token
 	farm_api.config_completed.connect(_on_config_response)
 	farm_api.load_completed.connect(_on_load_response)
 	farm_api.save_completed.connect(_on_save_response)
 	farm_api.action_completed.connect(_on_action_response)
 	farm_api.sell_completed.connect(_on_sell_response)
-	add_child(farm_api)
+	_get_systems_node().add_child(farm_api)
 
 	# Camera for pan/zoom
 	cam = Camera2D.new()
-	add_child(cam)
+	cam.name = "Camera2D"
+	_get_systems_node().add_child(cam)
 	cam.make_current()
 	camera_controller = CameraController.new()
+	camera_controller.name = "CameraController"
 	camera_controller.setup(cam, _cam_min_zoom)
+	camera_controller.set_background(_get_background())
 	camera_controller.tap.connect(_handle_click)
-	add_child(camera_controller)
+	_get_systems_node().add_child(camera_controller)
 	_setup_default_config()
 	_initialize_default_state()
 	_load_land_textures()
@@ -188,8 +202,26 @@ func _ready():
 	# 设置 UIOverlay 引用，让 UI 在 CanvasLayer 上独立绘制
 	_ui_overlay = get_node_or_null("UILayer/UIOverlay")
 	if _ui_overlay:
-		_ui_overlay.farm_ref = self
+		_ui_overlay.top_button_requested.connect(_open_top_toolbar_overlay)
+		_ui_overlay.tool_mode_requested.connect(_on_ui_tool_mode_requested)
+		_ui_overlay.reclaim_cancel_requested.connect(_close_reclaim_confirm)
+		_ui_overlay.reclaim_confirm_requested.connect(_on_ui_reclaim_confirm_requested)
+		_ui_overlay.reset_cancel_requested.connect(_on_ui_reset_cancel_requested)
+		_ui_overlay.reset_confirm_requested.connect(_on_ui_reset_confirm_requested)
+		_ui_overlay.shovel_all_cancel_requested.connect(_on_ui_shovel_all_cancel_requested)
+		_ui_overlay.shovel_all_confirm_requested.connect(_on_ui_shovel_all_confirm_requested)
+		_ui_overlay.overlay_draw_requested.connect(_draw_modal_ui)
+		_sync_ui_overlay_view_model()
 	_load_remote_config()
+
+func _get_systems_node() -> Node:
+	var systems := get_node_or_null(SYSTEMS_PATH)
+	if systems != null:
+		return systems
+	return self
+
+func _get_background() -> Sprite2D:
+	return get_node_or_null(WORLD_ROOT_PATH + "/Background") as Sprite2D
 
 func _setup_camera():
 	cam.position = Vector2(500.0, 530.0)
@@ -200,8 +232,16 @@ func _setup_camera():
 	get_viewport().size_changed.connect(_fit_camera_to_screen)
 
 func _setup_default_config():
-	CROPS = DEFAULT_CROPS.duplicate(true)
-	FERTILIZERS = DEFAULT_FERTILIZERS.duplicate(true)
+	var fallback := _load_catalog_fallback()
+	if fallback != null:
+		var crop_rows := fallback.to_crop_rows()
+		var fertilizer_rows := fallback.to_fertilizer_rows()
+		CROPS = crop_rows if not crop_rows.is_empty() else DEFAULT_CROPS.duplicate(true)
+		FERTILIZERS = fertilizer_rows if not fertilizer_rows.is_empty() else DEFAULT_FERTILIZERS.duplicate(true)
+	else:
+		CROPS = DEFAULT_CROPS.duplicate(true)
+		FERTILIZERS = DEFAULT_FERTILIZERS.duplicate(true)
+	_sync_catalogs()
 	CROP_COLORS = [
 		[Color(0.42, 0.76, 0.34), Color(0.72, 0.96, 0.46)],
 		[Color(0.24, 0.68, 0.22), Color(0.92, 0.24, 0.18)],
@@ -213,6 +253,12 @@ func _setup_default_config():
 		[Color(0.30, 0.70, 0.24), Color(0.96, 0.52, 0.12)],
 		[Color(0.26, 0.66, 0.22), Color(0.34, 0.86, 0.28)],
 	]
+
+func _load_catalog_fallback() -> FarmCatalogFallback:
+	if not ResourceLoader.exists(DEFAULT_CATALOG_PATH):
+		return null
+	var resource := load(DEFAULT_CATALOG_PATH)
+	return resource as FarmCatalogFallback
 
 func _load_remote_config():
 	if not is_instance_valid(farm_api):
@@ -255,6 +301,7 @@ func _apply_remote_config(data: Dictionary):
 			])
 		if not crops.is_empty():
 			CROPS = crops
+			_sync_catalogs()
 	if data.has("fertilizers") and data["fertilizers"] is Array:
 		var fertilizers: Array = []
 		for item in data["fertilizers"]:
@@ -277,6 +324,7 @@ func _apply_remote_config(data: Dictionary):
 			])
 		if not fertilizers.is_empty():
 			FERTILIZERS = fertilizers
+			_sync_catalogs()
 	if data.has("render_stage_thresholds") and data["render_stage_thresholds"] is Array:
 		var thresholds: Array = []
 		for value in data["render_stage_thresholds"]:
@@ -285,9 +333,13 @@ func _apply_remote_config(data: Dictionary):
 			RENDER_STAGE_THRESHOLDS = thresholds
 	_sync_all_overlays()
 
+func _sync_catalogs():
+	crop_catalog.set_crops(CROPS)
+	fertilizer_catalog.set_fertilizers(FERTILIZERS)
+
 # 等比缩放：viewport 宽高比 >= 场景宽高比 时以宽为准，否则以高为准
 func _fit_camera_to_screen():
-	var bg := get_node_or_null("Background")
+	var bg := _get_background()
 	if camera_controller != null and bg is Sprite2D:
 		camera_controller.fit_to_background(bg)
 		_cam_min_zoom = camera_controller.min_zoom
@@ -300,9 +352,12 @@ func _init_overlays():
 	shop.CROPS = CROPS
 	shop.CROP_COLORS = CROP_COLORS
 	shop.FERTILIZERS = FERTILIZERS
+	shop.crop_catalog = crop_catalog
+	shop.fertilizer_catalog = fertilizer_catalog
 	shop.seed_selected.connect(func(i: int):
 		selected_seed = i
-		toast_text = "已选择种子: " + str(CROPS[i][0])
+		state.selected_seed = i
+		toast_text = "已选择种子: " + crop_catalog.get_name(i)
 		toast_timer = 1.5
 		shop.selected_seed = i
 		shop.queue_redraw()
@@ -319,7 +374,8 @@ func _init_overlays():
 	)
 	shop.fertilizer_selected.connect(func(fi: int):
 		selected_fertilizer = fi
-		toast_text = "已选中: " + str(FERTILIZERS[fi][0])
+		state.selected_fertilizer = fi
+		toast_text = "已选中: " + fertilizer_catalog.get_name(fi)
 		toast_timer = 1.5
 		_sync_shop_data(shop)
 		shop.queue_redraw()
@@ -335,6 +391,7 @@ func _init_overlays():
 	if inv:
 		inv.CROPS = CROPS
 		inv.CROP_COLORS = CROP_COLORS
+		inv.crop_catalog = crop_catalog
 		inv.sell_requested.connect(func(cid: int, amount: int):
 			_send_sell(cid, amount)
 			inv.inventory = inventory
@@ -376,6 +433,8 @@ func _sync_shop_data(shop):
 	shop.fertilizer_inventory = fertilizer_inventory
 	shop.selected_seed = selected_seed
 	shop.selected_fertilizer = selected_fertilizer
+	shop.crop_catalog = crop_catalog
+	shop.fertilizer_catalog = fertilizer_catalog
 
 func _sync_all_overlays():
 	# Refresh any open overlay with latest state
@@ -384,6 +443,8 @@ func _sync_all_overlays():
 		shop.CROPS = CROPS
 		shop.CROP_COLORS = CROP_COLORS
 		shop.FERTILIZERS = FERTILIZERS
+		shop.crop_catalog = crop_catalog
+		shop.fertilizer_catalog = fertilizer_catalog
 		if shop_open:
 			_sync_shop_data(shop)
 			shop.queue_redraw()
@@ -391,6 +452,7 @@ func _sync_all_overlays():
 	if inv:
 		inv.CROPS = CROPS
 		inv.CROP_COLORS = CROP_COLORS
+		inv.crop_catalog = crop_catalog
 		if inventory_open:
 			inv.inventory = inventory
 			inv.queue_redraw()
@@ -406,31 +468,21 @@ func _on_sell_response(result: int, response_code: int, _headers: PackedStringAr
 		var parsed = JSON.parse_string(body.get_string_from_utf8())
 		if parsed is Dictionary and int(parsed.get("code", -1)) == 0:
 			var d: Dictionary = parsed.get("data", {})
-			gold = int(d.get("gold", gold))
+			var next_gold := int(d.get("gold", gold))
 			var sold: int = int(d.get("sold_count", 0))
 			var earned: int = int(d.get("gold_earned", 0))
 			var crop_id := _pending_sell_crop_id
 			_pending_sell_crop_id = -1
 			if crop_id >= 0:
-				inventory[crop_id] = max(0, int(inventory.get(crop_id, 0)) - sold)
-				toast_text = "售出 " + str(CROPS[crop_id][0]) + " x" + str(sold) + "，获得 " + str(earned) + " 金币"
+				state.apply_sell_result(crop_id, sold, next_gold)
+				_copy_state_from_model()
+				toast_text = "售出 " + crop_catalog.get_name(crop_id) + " x" + str(sold) + "，获得 " + str(earned) + " 金币"
 				toast_timer = 1.5
 			_cloud_load()
 
 func _initialize_default_state():
-	gold = 200
-	level = 1
-	exp_val = 0
-	exp_to_level = 100
-	farm = []
-	for _r in range(ROWS):
-		var row: Array = []
-		for _c in range(COLS):
-			row.append(_create_empty_cell(_c, _r))
-		farm.append(row)
-	inventory = {}
-	selected_seed = -1
-	tool_mode = 0
+	state.reset()
+	_copy_state_from_model()
 	hover_col = -1
 	hover_row = -1
 	mouse_held = false
@@ -449,10 +501,25 @@ func _initialize_default_state():
 	toast_timer = 0.0
 	save_timer = 0.0
 	event_check_timer = 0.0
-	_game_time = 0.0
-	fertilizer_inventory = {}
-	selected_fertilizer = -1
 	shop_tab = 0
+
+func _copy_state_from_model():
+	gold = state.gold
+	level = state.level
+	exp_val = state.exp_val
+	exp_to_level = state.exp_to_level
+	farm = state.farm
+	inventory = state.inventory
+	fertilizer_inventory = state.fertilizer_inventory
+	_game_time = state.game_time
+	selected_seed = state.selected_seed
+	tool_mode = state.tool_mode
+	selected_fertilizer = state.selected_fertilizer
+
+func _copy_client_state_to_model():
+	state.selected_seed = selected_seed
+	state.tool_mode = tool_mode
+	state.selected_fertilizer = selected_fertilizer
 
 func _load_land_textures():
 	land_textures.clear()
@@ -468,7 +535,7 @@ func _load_land_textures():
 const SANDY_BASE_PAD := 50.0
 
 func _init_sandy_base():
-	var base := get_node_or_null("PlotAnchors/SandyBase") as Polygon2D
+	var base := get_node_or_null(PLOT_ANCHORS_PATH + "/SandyBase") as Polygon2D
 	if base == null:
 		return
 	var anchors := get_node(PLOT_ANCHORS_PATH)
@@ -528,59 +595,23 @@ func _get_plot_position(c: int, r: int) -> Vector2:
 	if anchors != null:
 		var plot := anchors.get_node_or_null("Plot_%d_%d" % [r, c])
 		if plot is Node2D:
-			return anchors.position + (plot as Node2D).position
+			return (plot as Node2D).global_position
 	return iso2screen(c, r)
 
 func _create_empty_cell(col: int, row: int) -> Dictionary:
-	var initial_land_level := 1 if _get_plot_index(col, row) < INITIAL_UNLOCKED_PLOTS else LAND_LEVEL_LOCKED
-	return {
-		"crop_id": - 1,
-		"progress": 0.0,
-		"visual_progress": 0.0,
-		"wet_timer": 0.0,
-		"unlocked": initial_land_level > LAND_LEVEL_LOCKED,
-		"land_level": initial_land_level,
-		"land_work": 0,
-		# 打理状态
-		"water_state": 0, # 0=Normal, 1=Dry, 2=Watered
-		"dry_timer": 0.0, # 缺水累计秒数（产量惩罚用）
-		"water_protect_until": 0.0,
-		"bug_count": 0,
-		"bug_since": 0.0,
-		"bug_protect_until": 0.0,
-		"weed_count": 0,
-		"weed_since": 0.0,
-		"weed_protect_until": 0.0,
-		# 肥料状态
-		"fert_used": 0,
-		"fert_stage_used": {},
-		"fert_ids_used": [],
-		"yield_bonus_rate": 0.0,
-		"yield_loss_rate": 0.0,
-	}
+	return state.create_empty_cell(col, row)
 
 func _get_plot_index(col: int, row: int) -> int:
-	return row * COLS + col
+	return state.get_plot_index(col, row)
 
 func _get_reclaim_level(col: int, row: int) -> int:
-	return _get_plot_index(col, row) + 1
+	return state.get_reclaim_level(col, row)
 
 func _get_reclaim_cost(col: int, row: int) -> int:
-	return BASE_RECLAIM_COST + _get_plot_index(col, row) * RECLAIM_COST_STEP
+	return state.get_reclaim_cost(col, row)
 
 func _is_cell_unlocked(cell: Dictionary) -> bool:
-	return int(cell.get("land_level", LAND_LEVEL_LOCKED)) > LAND_LEVEL_LOCKED
-
-func _get_land_level_name(land_level: int) -> String:
-	if land_level <= LAND_LEVEL_LOCKED:
-		return "未开垦"
-	if land_level == 1:
-		return "黄土地Lv1"
-	if land_level == 2:
-		return "黄土地Lv2"
-	if land_level == 3:
-		return "红土地"
-	return "黑土地"
+	return state.is_cell_unlocked(cell)
 
 func screen2iso(pos: Vector2) -> Vector2i:
 	var dx := (pos.x - OX) / (TW * 0.5)
@@ -622,6 +653,7 @@ func _process(delta: float):
 		toast_timer -= delta
 		if toast_timer <= 0.0:
 			toast_text = ""
+	_sync_ui_overlay_view_model()
 	queue_redraw()
 	if _ui_overlay and is_instance_valid(_ui_overlay):
 		_ui_overlay.queue_redraw()
@@ -639,7 +671,7 @@ func _update_visual_progress(delta: float):
 			if cid < 0 or cid >= CROPS.size() or server_progress >= 1.0:
 				cell["visual_progress"] = server_progress
 				continue
-			var grow_time := maxf(float(CROPS[cid][3]), 0.001)
+			var grow_time := maxf(crop_catalog.get_grow_time(cid), 0.001)
 			var visual_progress := maxf(float(cell.get("visual_progress", server_progress)), server_progress)
 			cell["visual_progress"] = minf(visual_progress + delta / grow_time, 0.999)
 
@@ -652,7 +684,72 @@ func _exit_tree():
 
 func _set_tool_mode(mode: int):
 	tool_mode = clampi(mode, 0, TOOL_ICON_TEXTURES.size() - 1)
+	state.tool_mode = tool_mode
 	_apply_tool_cursor()
+
+func _on_ui_tool_mode_requested(index: int):
+	_set_tool_mode(index)
+	var mode_names := ["普通", "浇水", "施肥", "收获", "铲除", "全铲", "除虫", "除草", "全收", "仓库"]
+	toast_text = "切换到: " + mode_names[tool_mode] + "模式"
+	toast_timer = 1.0
+	_sync_ui_overlay_view_model()
+
+func _on_ui_reclaim_confirm_requested():
+	_try_reclaim_plot(reclaim_confirm_col, reclaim_confirm_row)
+	_close_reclaim_confirm()
+
+func _on_ui_reset_cancel_requested():
+	reset_confirm_open = false
+	queue_redraw()
+
+func _on_ui_reset_confirm_requested():
+	reset_confirm_open = false
+	_reset_save_data()
+
+func _on_ui_shovel_all_cancel_requested():
+	shovel_all_confirm_open = false
+	queue_redraw()
+
+func _on_ui_shovel_all_confirm_requested():
+	shovel_all_confirm_open = false
+	_send_action("shovel_all")
+
+func _build_ui_overlay_view_model() -> Dictionary:
+	var reclaim_plot_no := 0
+	var reclaim_level := 0
+	var reclaim_cost := 0
+	if reclaim_confirm_open:
+		reclaim_plot_no = _get_plot_index(reclaim_confirm_col, reclaim_confirm_row) + 1
+		reclaim_level = _get_reclaim_level(reclaim_confirm_col, reclaim_confirm_row)
+		reclaim_cost = _get_reclaim_cost(reclaim_confirm_col, reclaim_confirm_row)
+	return {
+		"gold": gold,
+		"level": level,
+		"exp_val": exp_val,
+		"exp_to_level": exp_to_level,
+		"unlocked_plot_count": _get_unlocked_plot_count(),
+		"plot_count": ROWS * COLS,
+		"tool_mode": tool_mode,
+		"toast_text": toast_text,
+		"toast_timer": toast_timer,
+		"top_buttons_blocked": reclaim_confirm_open \
+				or shovel_all_confirm_open \
+				or reset_confirm_open \
+				or warehouse_open \
+				or shop_open \
+				or inventory_open \
+				or settings_open,
+		"reclaim_confirm_open": reclaim_confirm_open,
+		"reset_confirm_open": reset_confirm_open,
+		"shovel_all_confirm_open": shovel_all_confirm_open,
+		"reclaim_plot_no": reclaim_plot_no,
+		"reclaim_level": reclaim_level,
+		"reclaim_cost": reclaim_cost,
+	}
+
+func _sync_ui_overlay_view_model():
+	if _ui_overlay and is_instance_valid(_ui_overlay) and _ui_overlay.has_method("update_view_model"):
+		_ui_overlay.update_view_model(_build_ui_overlay_view_model())
 
 func _build_cursor_cache():
 	_cursor_cache.clear()
@@ -803,59 +900,24 @@ func _input(event: InputEvent):
 			return
 
 func _do_tile_action(col: int, row: int):
-	if farm.is_empty() or row >= farm.size() or col >= farm[row].size():
-		return
-	var cell: Dictionary = farm[row][col]
-	if not _is_cell_unlocked(cell):
-		var next_locked := _get_next_locked_plot()
-		if next_locked.x != col or next_locked.y != row:
-			toast_text = "请按顺序先开垦下一块土地"
-			toast_timer = 1.8
-			return
-		_open_reclaim_confirm(col, row)
-		return
+	var intent := FarmRules.tile_action_intent(state, col, row, tool_mode, selected_seed, selected_fertilizer)
+	_execute_tile_intent(intent)
 
-	var pi: int = row * COLS + col
-
-	# 空地 → 种植
-	if cell["crop_id"] == -1:
-		if tool_mode == 4 or tool_mode == 5:
-			toast_text = "这里没有作物可以铲除"
-			toast_timer = 1.2
-		elif tool_mode == 8:
-			_send_action("harvest_all")
-		elif tool_mode == 9:
+func _execute_tile_intent(intent: Dictionary):
+	match str(intent.get("type", FarmRules.INTENT_NONE)):
+		FarmRules.INTENT_TOAST:
+			toast_text = str(intent.get("message", ""))
+			toast_timer = float(intent.get("duration", 1.5))
+		FarmRules.INTENT_RECLAIM_CONFIRM:
+			_open_reclaim_confirm(int(intent.get("col", -1)), int(intent.get("row", -1)))
+		FarmRules.INTENT_SERVER_ACTION:
+			var params = intent.get("params", {})
+			_send_action(str(intent.get("action", "")), params if params is Dictionary else {})
+		FarmRules.INTENT_OPEN_WAREHOUSE:
 			warehouse_open = true
 			queue_redraw()
-		elif selected_seed >= 0:
-			_send_action("plant", {"plot_index": pi, "crop_id": selected_seed})
-		else:
-			toast_text = "请先选择种子!"
-			toast_timer = 1.5
-		return
-
-	# 有作物 → 发送到服务端执行
-	match tool_mode:
-		0:
-			toast_text = "当前是普通模式，切换工具操作作物"
-			toast_timer = 1.0
-		1: _send_action("water", {"plot_index": pi})
-		2:
-			if selected_fertilizer >= 0:
-				_send_action("fertilize", {"plot_index": pi, "fert_id": selected_fertilizer})
-			else:
-				toast_text = "请先在商店购买并选择肥料"
-				toast_timer = 1.5
-		3: _send_action("harvest", {"plot_index": pi})
-		4: _send_action("shovel", {"plot_index": pi})
-		5:
+		FarmRules.INTENT_SHOVEL_ALL_CONFIRM:
 			shovel_all_confirm_open = true
-			queue_redraw()
-		6: _send_action("remove_bug", {"plot_index": pi})
-		7: _send_action("remove_weed", {"plot_index": pi})
-		8: _send_action("harvest_all")
-		9:
-			warehouse_open = true
 			queue_redraw()
 
 func _ctx_menu_rect(vp_pos: Vector2) -> Rect2:
@@ -867,7 +929,7 @@ func _ctx_menu_rect(vp_pos: Vector2) -> Rect2:
 	return Rect2(vp_pos.x - menu_w * 0.5, below_y, menu_w, menu_h)
 
 func _open_context_menu(col: int, row: int):
-	if farm.is_empty() or row >= farm.size() or col >= farm[row].size():
+	if row < 0 or col < 0 or farm.is_empty() or row >= farm.size() or col >= farm[row].size():
 		return
 	var cell: Dictionary = farm[row][col]
 	if not _is_cell_unlocked(cell):
@@ -882,34 +944,34 @@ func _open_context_menu(col: int, row: int):
 	ctx_col = col
 	ctx_row = row
 	ctx_menu_items.clear()
-	
-	if cell["crop_id"] == -1:
-		for i in range(CROPS.size()):
-			ctx_menu_items.append({
-				"type": "plant",
-				"crop_id": i,
-				"icon": _get_crop_seed_texture(i)
-			})
-	else:
-		# 成熟以进度为准（与作物上的"收获"标签一致），_get_growth_stage 最高只到 2，
-		# 不能用来判断成熟，否则成熟作物永远显示不出收获按钮。
-		if float(cell.get("progress", 0.0)) >= 1.0:
-			ctx_menu_items.append({"type": "harvest", "icon": TOOL_ICON_TEXTURES[3]})
-		else:
-			if int(cell.get("weed_count", 0)) > 0:
-				ctx_menu_items.append({"type": "weed", "icon": TOOL_ICON_TEXTURES[7]})
-			if int(cell.get("bug_count", 0)) > 0:
-				ctx_menu_items.append({"type": "pest", "icon": TOOL_ICON_TEXTURES[6]})
-			if int(cell.get("water_state", 0)) == 0:
-				ctx_menu_items.append({"type": "water", "icon": TOOL_ICON_TEXTURES[1]})
-			ctx_menu_items.append({"type": "fertilize", "icon": TOOL_ICON_TEXTURES[2]})
-			
-		ctx_menu_items.append({"type": "shovel", "icon": TOOL_ICON_TEXTURES[4]})
+	for spec in FarmRules.context_menu_item_specs(state, col, row, CROPS.size()):
+		ctx_menu_items.append(_context_menu_item_with_icon(spec))
 		
 	ctx_menu_open = true
 	queue_redraw()
 
+func _context_menu_item_with_icon(spec: Dictionary) -> Dictionary:
+	var item := spec.duplicate(true)
+	match str(item.get("type", "")):
+		"plant":
+			item["icon"] = _get_crop_seed_texture(int(item.get("crop_id", -1)))
+		"harvest":
+			item["icon"] = TOOL_ICON_TEXTURES[3]
+		"weed":
+			item["icon"] = TOOL_ICON_TEXTURES[7]
+		"pest":
+			item["icon"] = TOOL_ICON_TEXTURES[6]
+		"water":
+			item["icon"] = TOOL_ICON_TEXTURES[1]
+		"fertilize":
+			item["icon"] = TOOL_ICON_TEXTURES[2]
+		"shovel":
+			item["icon"] = TOOL_ICON_TEXTURES[4]
+	return item
+
 func _execute_context_action(col: int, row: int, item: Dictionary):
+	if row < 0 or col < 0 or row >= ROWS or col >= COLS or not item.has("type"):
+		return
 	var pi = row * COLS + col
 	var t = item["type"]
 	if t == "plant":
@@ -1045,75 +1107,11 @@ func _on_action_response(result: int, response_code: int, _headers: PackedString
 	_apply_state(data)
 
 func _apply_state(data: Dictionary):
-	# Update user fields
-	gold = int(data.get("gold", gold))
-	level = int(data.get("level", level))
-	exp_val = int(data.get("exp_val", exp_val))
-	exp_to_level = int(data.get("exp_to_level", exp_to_level))
-	_game_time = float(data.get("game_time", _game_time))
-	# Update inventory
-	if data.has("inventory") and (data["inventory"] is Dictionary):
-		inventory = data["inventory"]
-		_normalize_inventory_keys()
-	# Update fertilizer inventory
-	if data.has("fertilizer_inventory") and (data["fertilizer_inventory"] is Dictionary):
-		fertilizer_inventory = {}
-		for k in data["fertilizer_inventory"].keys():
-			fertilizer_inventory[int(k)] = int(data["fertilizer_inventory"][k])
-	# Update plots
-	if data.has("plots") and (data["plots"] is Array):
-		for p in data["plots"]:
-			if not (p is Dictionary):
-				continue
-			var pi: int = int(p.get("plot_index", -1))
-			if pi < 0 or pi >= ROWS * COLS:
-				continue
-			var r: int = pi / COLS
-			var c: int = pi % COLS
-			var cell: Dictionary = farm[r][c]
-			cell["unlocked"] = bool(p.get("unlocked", false))
-			cell["land_level"] = int(p.get("land_level", 0))
-			cell["land_work"] = int(p.get("land_work", 0))
-			var cid_raw = p.get("crop_id", null)
-			cell["crop_id"] = int(cid_raw) if cid_raw != null else -1
-			var progress := clampf(float(p.get("progress", 0.0)), 0.0, 1.0)
-			cell["progress"] = progress
-			cell["visual_progress"] = progress
-			cell["wet_timer"] = maxf(float(p.get("wet_timer", 0.0)), 0.0)
-			cell["water_state"] = int(p.get("water_state", 0))
-			cell["dry_timer"] = maxf(float(p.get("dry_timer", 0.0)), 0.0)
-			cell["water_protect_until"] = float(p.get("water_protect_until", 0.0))
-			cell["bug_count"] = clampi(int(p.get("bug_count", 0)), 0, 3)
-			cell["bug_since"] = float(p.get("bug_since", 0.0))
-			cell["bug_protect_until"] = float(p.get("bug_protect_until", 0.0))
-			cell["weed_count"] = clampi(int(p.get("weed_count", 0)), 0, 3)
-			cell["weed_since"] = float(p.get("weed_since", 0.0))
-			cell["weed_protect_until"] = float(p.get("weed_protect_until", 0.0))
-			cell["fert_used"] = clampi(int(p.get("fert_used", 0)), 0, 3)
-			cell["fert_stage_used"] = _parse_dictish_json(p.get("fert_stage_used", {}))
-			cell["fert_ids_used"] = _parse_arrayish_json(p.get("fert_ids_used", []))
-			cell["yield_bonus_rate"] = maxf(float(p.get("yield_bonus_rate", 0.0)), 0.0)
-			cell["yield_loss_rate"] = clampf(float(p.get("yield_loss_rate", 0.0)), 0.0, 0.30)
+	_copy_client_state_to_model()
+	state.apply_server_state(data)
+	_copy_state_from_model()
 	_sync_all_overlays()
 	queue_redraw()
-
-func _parse_dictish_json(value) -> Dictionary:
-	if value is Dictionary:
-		return value
-	if value is String:
-		var parsed = JSON.parse_string(value)
-		if parsed is Dictionary:
-			return parsed
-	return {}
-
-func _parse_arrayish_json(value) -> Array:
-	if value is Array:
-		return value
-	if value is String:
-		var parsed = JSON.parse_string(value)
-		if parsed is Array:
-			return parsed
-	return []
 
 func _try_reclaim_plot(col: int, row: int):
 	# 服务端权威：开垦校验与扣费全部由后端处理
@@ -1157,19 +1155,10 @@ func _point_in_rect(point: Vector2, rect: Rect2) -> bool:
 
 
 func _get_unlocked_plot_count() -> int:
-	var count := 0
-	for r in range(ROWS):
-		for c in range(COLS):
-			if _is_cell_unlocked(farm[r][c]):
-				count += 1
-	return count
+	return state.get_unlocked_plot_count()
 
 func _get_next_locked_plot() -> Vector2i:
-	for r in range(ROWS):
-		for c in range(COLS):
-			if not _is_cell_unlocked(farm[r][c]):
-				return Vector2i(c, r)
-	return Vector2i(-1, -1)
+	return state.get_next_locked_plot()
 
 func _save_game(show_toast := true):
 	# 服务端权威：游戏状态由 /farm/action 改动，这里只回传客户端偏好（选中种子/工具）。
@@ -1188,10 +1177,8 @@ func _on_save_response(_result: int, _response_code: int, _headers: PackedString
 	_save_pending = false
 
 func _build_save_payload() -> Dictionary:
-	return {
-		"selected_seed": selected_seed,
-		"tool_mode": tool_mode,
-	}
+	_copy_client_state_to_model()
+	return state.build_save_payload()
 
 func _load_game():
 	if not _config_loaded:
@@ -1223,18 +1210,59 @@ func _on_load_response(result: int, response_code: int, _headers: PackedStringAr
 func _apply_cloud_data(data: Dictionary):
 	_apply_state(data)
 
-func _normalize_inventory_keys():
-	var fixed := {}
-	for key in inventory.keys():
-		var cid := int(key)
-		fixed[cid] = int(inventory[key])
-	inventory = fixed
-
 # ===================== DRAW =====================
 func _draw():
 	if farm.is_empty():
 		return
-	FarmRenderer.draw_world(self)
+	FarmRenderer.draw_world(_build_render_context())
+
+func _build_render_context() -> Dictionary:
+	return {
+		"draw_api": self,
+		"state": state,
+		"rows": ROWS,
+		"cols": COLS,
+		"tile_width": TW,
+		"tile_height": TH,
+		"tile_gap": TILE_GAP,
+		"land_level_max": LAND_LEVEL_MAX,
+		"land_upgrade_work_required": LAND_UPGRADE_WORK_REQUIRED,
+		"crop_catalog": crop_catalog,
+		"crop_colors": CROP_COLORS,
+		"render_stage_thresholds": RENDER_STAGE_THRESHOLDS,
+		"land_textures": land_textures,
+		"land_texture_source_rects": land_texture_source_rects,
+		"land_texture_avg_colors": land_texture_avg_colors,
+		"plot_positions": _build_plot_positions(),
+		"hover": Vector2i(hover_col, hover_row),
+		"context_menu_open": ctx_menu_open,
+		"context_tile": Vector2i(ctx_col, ctx_row),
+		"selected_seed": selected_seed,
+		"selected_fertilizer": selected_fertilizer,
+		"tool_mode": tool_mode,
+		"level": level,
+		"gold": gold,
+		"sign_texture": _sign_texture,
+		"font": _cn_font,
+		"viewport_size": get_viewport().get_visible_rect().size,
+		"canvas_transform": get_viewport().get_canvas_transform(),
+		"can_show_tooltip": not shop_open \
+				and not inventory_open \
+				and not settings_open \
+				and not reclaim_confirm_open \
+				and not reset_confirm_open \
+				and not warehouse_open \
+				and not shovel_all_confirm_open,
+	}
+
+func _build_plot_positions() -> Array:
+	var positions: Array = []
+	for row in range(ROWS):
+		var row_positions: Array = []
+		for col in range(COLS):
+			row_positions.append(_get_plot_position(col, row))
+		positions.append(row_positions)
+	return positions
 
 # ---- 以下 UI 固定在屏幕上，不受 Camera 影响 ----
 # 被 UIOverlay._draw() 调用，caller 是 UIOverlay 节点（CanvasLayer 子节点）
@@ -1280,82 +1308,6 @@ func _draw_context_menu_overlay(vp: Vector2):
 			var idraw_pos = Vector2(ix + 25 - idraw_sz.x * 0.5, iy + 25 - idraw_sz.y * 0.5)
 			_d_texture_rect(item["icon"], Rect2(idraw_pos, idraw_sz), false)
 
-# ---- SIGN DRAWING ----
-func _draw_sign(cx: float, cy: float, sign_color: Color, label: String, can_open: bool):
-	var board_w: float = TW * 0.70
-	var board_h: float = board_w
-	var board_top: float = cy - board_w
-	var board_cx: float = cx
-	# 木牌主体（图已含杆子，无需再画）
-	var sign_size := _sign_texture.get_size()
-	var scale: float = minf(board_w / sign_size.x, board_h / sign_size.y)
-	var draw_size := sign_size * scale
-	var draw_pos := Vector2(board_cx - draw_size.x * 0.5, board_top + (board_h - draw_size.y) * 0.5)
-	_d_texture_rect(_sign_texture, Rect2(draw_pos, draw_size), false)
-	# 文字在牌子内部
-	var f: Font = _cn_font if _cn_font != null else ThemeDB.fallback_font
-	var text_color: Color = Color(0.12, 0.32, 0.12) if can_open else Color(0.78, 0.12, 0.1)
-	var text_size: int = 14
-	var lw: float = f.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, text_size).x
-	_draw_text(board_cx - lw * 0.5, board_top + board_h * 0.24, label, text_size, text_color)
-
-# ---- PLANT DRAWING ----
-func _draw_plant_full(cx: float, cy: float, leaf: Color, fruit: Color):
-	var by: float = cy
-	var sh: float = 28.0
-	# Stem
-	_d_line(Vector2(cx, by), Vector2(cx, by - sh), Color(0.2, 0.5, 0.12), 3.0)
-	# Leaves
-	_d_circle(Vector2(cx - 10, by - sh * 0.6), 8, leaf)
-	_d_circle(Vector2(cx + 10, by - sh * 0.55), 7, leaf)
-	# Fruit
-	_d_circle(Vector2(cx, by - sh - 4), 10, fruit)
-	_d_circle(Vector2(cx - 3, by - sh - 7), 3, Color(1, 1, 1, 0.35))
-
-func _draw_plant_growing(cx: float, cy: float, leaf: Color, prog: float):
-	var by: float = cy
-	var sh: float = 10.0 + prog * 18.0
-	_d_line(Vector2(cx, by), Vector2(cx, by - sh), Color(0.2, 0.5, 0.12), 2.5)
-	_d_circle(Vector2(cx, by - sh), 5 + int(prog * 4), leaf)
-	_d_circle(Vector2(cx - 6, by - sh * 0.5), 4, leaf)
-	_d_circle(Vector2(cx + 6, by - sh * 0.45), 3.5, leaf)
-
-func _draw_plant_seed(cx: float, cy: float, prog: float):
-	var by: float = cy
-	# Small sprout
-	var h: float = 3.0 + prog * 10.0
-	_d_line(Vector2(cx, by), Vector2(cx, by - h), Color(0.25, 0.6, 0.15), 2.0)
-	if prog > 0.05:
-		_d_circle(Vector2(cx - 2, by - h), 3, Color(0.3, 0.75, 0.2))
-		_d_circle(Vector2(cx + 2, by - h + 1), 2.5, Color(0.3, 0.75, 0.2))
-	# Seed
-	_d_circle(Vector2(cx, by + 2), 3.5, Color(0.6, 0.45, 0.25))
-
-func _draw_land_tile(corners: PackedVector2Array, cell: Dictionary):
-	var texture := _get_land_texture(cell)
-	var bg_color: Color
-	if texture != null:
-		var key := _get_land_texture_key(cell)
-		bg_color = land_texture_avg_colors.get(key, Color(0.5, 0.4, 0.25))
-	else:
-		bg_color = Color(0.52, 0.36, 0.20)
-	# 半透明底色，让 SandyBase 从缝隙和边缘透出来
-	bg_color.a = 0.78
-	_d_colored_polygon(corners, bg_color)
-	if texture != null:
-		var size := texture.get_size()
-		if size.x <= 0.0 or size.y <= 0.0:
-			return
-		var center := Vector2.ZERO
-		for point in corners:
-			center += point
-		center /= maxf(float(corners.size()), 1.0)
-		var source := _get_land_texture_source_rect(cell, size)
-		var vw: float = TW - TILE_GAP
-		var vh: float = TH - TILE_GAP
-		var dest := Rect2(center.x - vw * 0.5, center.y - vh * 0.5, vw, vh)
-		draw_texture_rect_region(texture, dest, source)
-
 func _get_texture_avg_color(texture: Texture2D) -> Color:
 	var image := texture.get_image()
 	if image == null or image.is_empty():
@@ -1371,42 +1323,6 @@ func _get_texture_avg_color(texture: Texture2D) -> Color:
 	if count == 0:
 		return Color(0.5, 0.4, 0.25)
 	return Color(sum_r / count, sum_g / count, sum_b / count)
-
-func _draw_land_tooltip(col: int, row: int):
-	var cell: Dictionary = farm[row][col]
-	var sp := _get_plot_position(col, row)
-	var vp: Vector2 = get_viewport().get_visible_rect().size
-	var ctrans := get_viewport().get_canvas_transform()
-	var w_min := ctrans.affine_inverse() * Vector2.ZERO
-	var w_max := ctrans.affine_inverse() * vp
-	var tw := 176.0
-	var th := 78.0
-	var tx := clampf(sp.x - tw * 0.5, w_min.x + 5.0, w_max.x - tw - 5.0)
-	var ty := clampf(sp.y - TH * 0.5 - th - 18.0, w_min.y + 5.0, w_max.y - th - 5.0)
-	var land_level := int(cell.get("land_level", 1))
-	var work := int(cell.get("land_work", 0))
-	_d_rect(Rect2(tx, ty, tw, th), Color(0.08, 0.05, 0.02, 0.92))
-	_d_rect(Rect2(tx, ty, tw, th), Color(0.55, 0.42, 0.2), false, 2)
-	_d_rect(Rect2(tx, ty, tw, 22), Color(0.38, 0.28, 0.12))
-	_draw_text(tx + 8, ty + 3, _get_land_level_name(land_level), 13, Color(1.0, 0.92, 0.72))
-	if land_level >= LAND_LEVEL_MAX:
-		_draw_text(tx + 10, ty + 32, "已是最高等级", 12, Color(0.95, 0.82, 0.42))
-	else:
-		_draw_text(tx + 10, ty + 32, "土地经验: " + str(work) + "/" + str(LAND_UPGRADE_WORK_REQUIRED), 12, Color(0.95, 0.82, 0.42))
-		_draw_text(tx + 10, ty + 50, "收获后增加 1 点", 11, Color(0.7, 0.85, 1.0))
-	var arrow_x: float = clampf(sp.x, tx + 10.0, tx + tw - 10.0)
-	var arrow_pts: PackedVector2Array = PackedVector2Array([
-		Vector2(arrow_x - 6.0, ty + th),
-		Vector2(arrow_x, ty + th + 8.0),
-		Vector2(arrow_x + 6.0, ty + th),
-	])
-	_d_colored_polygon(arrow_pts, Color(0.08, 0.05, 0.02, 0.92))
-
-func _get_land_texture_source_rect(cell: Dictionary, size: Vector2) -> Rect2:
-	var key := _get_land_texture_key(cell)
-	if land_texture_source_rects.has(key):
-		return land_texture_source_rects[key]
-	return Rect2(Vector2.ZERO, size)
 
 func _get_texture_alpha_bounds(texture: Texture2D) -> Rect2:
 	var image := texture.get_image()
@@ -1437,34 +1353,17 @@ func _inset_polygon(points: PackedVector2Array, amount: float) -> PackedVector2A
 		result.append(center + (point - center) * (1.0 - amount))
 	return result
 
-func _get_land_texture(cell: Dictionary) -> Texture2D:
-	return land_textures.get(_get_land_texture_key(cell), null) as Texture2D
-
-func _get_land_texture_key(cell: Dictionary) -> String:
-	if not _is_cell_unlocked(cell):
-		return "locked"
-	var level := _get_land_level_key(int(cell.get("land_level", 1)))
-	var suffix := "wet" if float(cell.get("wet_timer", 0.0)) > 0.0 else "dry"
-	return level + "_" + suffix
-
-func _get_land_level_key(land_level: int) -> String:
-	if land_level <= 2:
-		return "yellow"
-	if land_level == 3:
-		return "red"
-	return "black"
-
 func _get_crop_stage_texture(cid: int, prog: float) -> Texture2D:
 	var stage := _get_growth_stage(prog)
 	if stage < 0:
 		return null
-	return CropAtlas.get_stage_texture(str(CROPS[cid][4]), stage + 1)
+	return CropAtlas.get_stage_texture(crop_catalog.get_texture_key(cid), stage + 1)
 
 func _get_crop_seed_texture(cid: int) -> Texture2D:
-	return CropAtlas.get_stage_texture(str(CROPS[cid][4]), 0)
+	return CropAtlas.get_stage_texture(crop_catalog.get_texture_key(cid), 0)
 
 func _get_crop_mature_texture(cid: int) -> Texture2D:
-	return CropAtlas.get_stage_texture(str(CROPS[cid][4]), 3)
+	return CropAtlas.get_stage_texture(crop_catalog.get_texture_key(cid), 3)
 
 func _get_growth_stage(prog: float) -> int:
 	if RENDER_STAGE_THRESHOLDS.size() < 4:
@@ -1478,54 +1377,6 @@ func _get_growth_stage(prog: float) -> int:
 	if prog < float(RENDER_STAGE_THRESHOLDS[3]):
 		return 2
 	return 2
-
-func _draw_crop_atlas_texture(cx: float, tile_center_y: float, texture: Texture2D, prog: float, cid: int, stage: int):
-	var size := texture.get_size()
-	if size.x <= 0.0 or size.y <= 0.0:
-		return
-	var scale_factor := _get_crop_scale(cid, size, stage)
-	var draw_size := size * scale_factor
-	var anchor := _get_crop_ground_anchor(texture)
-	var draw_pos := Vector2(cx, tile_center_y) - anchor * scale_factor
-	_d_texture_rect(texture, Rect2(draw_pos, draw_size), false)
-
-func _get_crop_scale(cid: int, size: Vector2, stage: int) -> float:
-	var target_size := 110.0
-	var crop_key := str(CROPS[cid][4])
-	match crop_key:
-		"lettuce":
-			target_size = 92.0
-		"pepper":
-			target_size = 100.0
-		"eggplant":
-			target_size = 102.0
-		"tomato":
-			target_size = 104.0
-		"strawberry":
-			target_size = 96.0
-		"corn":
-			target_size = 118.0
-		"sunflower":
-			target_size = 126.0
-		"pumpkin":
-			target_size = 112.0
-		"watermelon":
-			target_size = 114.0
-	var stage_multiplier := 1.0
-	match stage:
-		0:
-			stage_multiplier = 0.62
-		1:
-			stage_multiplier = 0.82
-		2:
-			stage_multiplier = 1.0
-	var base_scale := minf(1.0, target_size / maxf(size.x, size.y)) * stage_multiplier
-	var width_limit_scale := (TW * 0.8) / maxf(size.x, 1.0)
-	return minf(base_scale, width_limit_scale)
-
-func _get_crop_ground_anchor(texture: Texture2D) -> Vector2:
-	var bounds := _get_texture_alpha_bounds(texture)
-	return Vector2(bounds.position.x + bounds.size.x * 0.5, bounds.position.y + bounds.size.y)
 
 func _draw_crop_preview(x: float, y: float, texture: Texture2D, label: String):
 	var bg_rect := Rect2(x, y, 120, 92)
@@ -1564,16 +1415,6 @@ func _draw_inventory_crop_icon(rect: Rect2, texture: Texture2D):
 	var scale_factor := minf(rect.size.x / size.x, rect.size.y / size.y)
 	var draw_size := size * scale_factor
 	var draw_pos := rect.position + Vector2((rect.size.x - draw_size.x) * 0.5, rect.size.y - draw_size.y)
-	_d_texture_rect(texture, Rect2(draw_pos, draw_size), false)
-
-func _draw_seed_preview_texture(cx: float, cy: float, texture: Texture2D):
-	var size := texture.get_size()
-	if size.x <= 0.0 or size.y <= 0.0:
-		return
-	var target := 26.0
-	var scale_factor := minf(target / size.x, target / size.y)
-	var draw_size := size * scale_factor
-	var draw_pos := Vector2(cx - draw_size.x * 0.5, cy - draw_size.y * 0.5)
 	_d_texture_rect(texture, Rect2(draw_pos, draw_size), false)
 
 # ---- Text helper ----

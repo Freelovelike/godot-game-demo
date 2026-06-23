@@ -1,0 +1,224 @@
+[gd_resource type="Resource" load_steps=20 format=3]
+
+[ext_resource type="Script" path="res://scripts/farm/farm_catalog_fallback.gd" id="1_catalog"]
+[ext_resource type="Script" path="res://scripts/farm/crop_def.gd" id="2_crop"]
+[ext_resource type="Script" path="res://scripts/farm/fertilizer_def.gd" id="3_fert"]
+
+[sub_resource type="Resource" id="CropDef_0"]
+script = ExtResource("2_crop")
+crop_name = "生菜"
+seed_cost = 12
+grow_time = 12.0
+texture_key = "lettuce"
+base_yield = 4
+unit_sell = 8
+min_yield = 3
+max_yield = 5
+dry_rate = 0.06
+bug_rate = 0.0
+weed_rate = 0.04
+max_bug = 0
+max_weed = 1
+
+[sub_resource type="Resource" id="CropDef_1"]
+script = ExtResource("2_crop")
+crop_name = "辣椒"
+seed_cost = 20
+grow_time = 20.0
+texture_key = "pepper"
+base_yield = 6
+unit_sell = 10
+min_yield = 4
+max_yield = 7
+dry_rate = 0.1
+bug_rate = 0.05
+weed_rate = 0.05
+max_bug = 1
+max_weed = 1
+
+[sub_resource type="Resource" id="CropDef_2"]
+script = ExtResource("2_crop")
+crop_name = "茄子"
+seed_cost = 35
+grow_time = 32.0
+texture_key = "eggplant"
+base_yield = 5
+unit_sell = 19
+min_yield = 3
+max_yield = 6
+dry_rate = 0.1
+bug_rate = 0.08
+weed_rate = 0.08
+max_bug = 2
+max_weed = 2
+
+[sub_resource type="Resource" id="CropDef_3"]
+script = ExtResource("2_crop")
+crop_name = "西红柿"
+seed_cost = 55
+grow_time = 48.0
+texture_key = "tomato"
+base_yield = 8
+unit_sell = 19
+min_yield = 6
+max_yield = 10
+dry_rate = 0.14
+bug_rate = 0.09
+weed_rate = 0.07
+max_bug = 2
+max_weed = 2
+
+[sub_resource type="Resource" id="CropDef_4"]
+script = ExtResource("2_crop")
+crop_name = "草莓"
+seed_cost = 80
+grow_time = 70.0
+texture_key = "strawberry"
+base_yield = 12
+unit_sell = 18
+min_yield = 9
+max_yield = 14
+dry_rate = 0.16
+bug_rate = 0.12
+weed_rate = 0.1
+max_bug = 2
+max_weed = 2
+
+[sub_resource type="Resource" id="CropDef_5"]
+script = ExtResource("2_crop")
+crop_name = "玉米"
+seed_cost = 120
+grow_time = 100.0
+texture_key = "corn"
+base_yield = 6
+unit_sell = 57
+min_yield = 4
+max_yield = 7
+dry_rate = 0.18
+bug_rate = 0.07
+weed_rate = 0.12
+max_bug = 2
+max_weed = 3
+
+[sub_resource type="Resource" id="CropDef_6"]
+script = ExtResource("2_crop")
+crop_name = "向日葵"
+seed_cost = 170
+grow_time = 135.0
+texture_key = "sunflower"
+base_yield = 4
+unit_sell = 125
+min_yield = 3
+max_yield = 5
+dry_rate = 0.13
+bug_rate = 0.04
+weed_rate = 0.09
+max_bug = 1
+max_weed = 2
+
+[sub_resource type="Resource" id="CropDef_7"]
+script = ExtResource("2_crop")
+crop_name = "南瓜"
+seed_cost = 240
+grow_time = 180.0
+texture_key = "pumpkin"
+base_yield = 3
+unit_sell = 240
+min_yield = 2
+max_yield = 4
+dry_rate = 0.12
+bug_rate = 0.11
+weed_rate = 0.15
+max_bug = 3
+max_weed = 3
+
+[sub_resource type="Resource" id="CropDef_8"]
+script = ExtResource("2_crop")
+crop_name = "西瓜"
+seed_cost = 320
+grow_time = 230.0
+texture_key = "watermelon"
+base_yield = 5
+unit_sell = 196
+min_yield = 3
+max_yield = 7
+dry_rate = 0.2
+bug_rate = 0.12
+weed_rate = 0.14
+max_bug = 3
+max_weed = 3
+
+[sub_resource type="Resource" id="FertilizerDef_0"]
+script = ExtResource("3_fert")
+fertilizer_name = "初级速生肥"
+cost = 15
+fertilizer_type = "speed"
+effect_value = 0.08
+allowed_stages = [0, 1]
+per_crop_limit = 1
+max_minutes_limit = 10
+
+[sub_resource type="Resource" id="FertilizerDef_1"]
+script = ExtResource("3_fert")
+fertilizer_name = "中级速生肥"
+cost = 40
+fertilizer_type = "speed"
+effect_value = 0.12
+allowed_stages = [1, 2]
+per_crop_limit = 1
+max_minutes_limit = 30
+
+[sub_resource type="Resource" id="FertilizerDef_2"]
+script = ExtResource("3_fert")
+fertilizer_name = "高级速生肥"
+cost = 80
+fertilizer_type = "speed"
+effect_value = 0.18
+allowed_stages = [2]
+per_crop_limit = 1
+max_minutes_limit = 60
+
+[sub_resource type="Resource" id="FertilizerDef_3"]
+script = ExtResource("3_fert")
+fertilizer_name = "保湿肥"
+cost = 30
+fertilizer_type = "water_protect"
+effect_value = 7200.0
+allowed_stages = [0, 1, 2]
+per_crop_limit = 1
+max_minutes_limit = 0
+
+[sub_resource type="Resource" id="FertilizerDef_4"]
+script = ExtResource("3_fert")
+fertilizer_name = "防虫肥"
+cost = 35
+fertilizer_type = "bug_protect"
+effect_value = 7200.0
+allowed_stages = [1, 2]
+per_crop_limit = 1
+max_minutes_limit = 0
+
+[sub_resource type="Resource" id="FertilizerDef_5"]
+script = ExtResource("3_fert")
+fertilizer_name = "除草剂"
+cost = 25
+fertilizer_type = "weed_protect"
+effect_value = 7200.0
+allowed_stages = [-1, 0, 1, 2]
+per_crop_limit = 1
+max_minutes_limit = 0
+
+[sub_resource type="Resource" id="FertilizerDef_6"]
+script = ExtResource("3_fert")
+fertilizer_name = "丰收肥"
+cost = 60
+fertilizer_type = "yield_bonus"
+effect_value = 0.1
+allowed_stages = [2]
+per_crop_limit = 1
+max_minutes_limit = 0
+
+[resource]
+script = ExtResource("1_catalog")
+crops = [SubResource("CropDef_0"), SubResource("CropDef_1"), SubResource("CropDef_2"), SubResource("CropDef_3"), SubResource("CropDef_4"), SubResource("CropDef_5"), SubResource("CropDef_6"), SubResource("CropDef_7"), SubResource("CropDef_8")]
+fertilizers = [SubResource("FertilizerDef_0"), SubResource("FertilizerDef_1"), SubResource("FertilizerDef_2"), SubResource("FertilizerDef_3"), SubResource("FertilizerDef_4"), SubResource("FertilizerDef_5"), SubResource("FertilizerDef_6")]

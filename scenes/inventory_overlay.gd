@@ -4,6 +4,7 @@ extends Control
 
 var CROPS: Array = []
 var CROP_COLORS: Array = []
+var crop_catalog: CropCatalog = null
 var inventory: Dictionary = {}:
 	set(value):
 		inventory = value
@@ -96,12 +97,10 @@ func _make_card(cid: int, cnt: int) -> Control:
 	# 色块图标
 	var icon := ColorRect.new()
 	icon.custom_minimum_size = Vector2(0, 40)
-	if CROP_COLORS.size() > cid:
-		icon.color = CROP_COLORS[cid][1]
+	icon.color = _crop_color(cid, 1)
 	box.add_child(icon)
 
-	var name_str := str(CROPS[cid][0]) if CROPS.size() > cid else ("作物" + str(cid))
-	box.add_child(UIKit.make_label(name_str, 16, Color(0.1, 0.1, 0.2), HORIZONTAL_ALIGNMENT_CENTER))
+	box.add_child(UIKit.make_label(_crop_name(cid), 16, Color(0.1, 0.1, 0.2), HORIZONTAL_ALIGNMENT_CENTER))
 	box.add_child(UIKit.make_label("数量: " + str(cnt), 14, Color(0.3, 0.2, 0.4), HORIZONTAL_ALIGNMENT_CENTER))
 
 	# 卖出按钮行
@@ -117,8 +116,24 @@ func _make_card(cid: int, cnt: int) -> Control:
 	sellall.pressed.connect(func(): sell_requested.emit(cid, cnt))
 	row.add_child(sellall)
 
-	if CROPS.size() > cid:
-		var price := "x" + str(int(CROPS[cid][6])) + " 金/个"
+	if _crop_is_valid(cid):
+		var price := "x" + str(_crop_unit_sell(cid)) + " 金/个"
 		box.add_child(UIKit.make_label(price, 11, Color(0.5, 0.4, 0.1), HORIZONTAL_ALIGNMENT_CENTER))
 
 	return card
+
+func _crop_is_valid(cid: int) -> bool:
+	return crop_catalog.is_valid_id(cid) if crop_catalog != null else cid >= 0 and CROPS.size() > cid
+
+func _crop_name(cid: int) -> String:
+	return crop_catalog.get_name(cid) if crop_catalog != null else (str(CROPS[cid][0]) if cid >= 0 and CROPS.size() > cid else "作物" + str(cid))
+
+func _crop_unit_sell(cid: int) -> int:
+	return crop_catalog.get_unit_sell(cid) if crop_catalog != null else (int(CROPS[cid][6]) if cid >= 0 and CROPS.size() > cid else 0)
+
+func _crop_color(cid: int, color_index: int) -> Color:
+	if cid >= 0 and cid < CROP_COLORS.size():
+		var colors = CROP_COLORS[cid]
+		if colors is Array and color_index >= 0 and color_index < colors.size():
+			return colors[color_index]
+	return Color(0.42, 0.76, 0.34) if color_index == 0 else Color(0.72, 0.96, 0.46)

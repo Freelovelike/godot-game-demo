@@ -8,7 +8,7 @@ extends EditorPlugin
 # 配置变量（根据godot-dev-guide使用@export）
 # ============================================================================
 
-@export var auto_start: bool = false:
+@export var auto_start: bool = true:
 	set(value):
 		auto_start = value
 		notify_property_list_changed()
@@ -52,7 +52,7 @@ extends EditorPlugin
 		auth_token = value
 		notify_property_list_changed()
 
-@export_range(0, 3, 1) var log_level: int = 2:  # 0=ERROR, 1=WARN, 2=INFO, 3=DEBUG (默认2=INFO，便于测试)
+@export_range(0, 3, 1) var log_level: int = 3:  # 0=ERROR, 1=WARN, 2=INFO, 3=DEBUG
 	set(value):
 		log_level = value
 		if _native_server:

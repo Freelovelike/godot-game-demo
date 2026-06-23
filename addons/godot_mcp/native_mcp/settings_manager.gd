@@ -12,8 +12,8 @@ const DEFAULT_SETTINGS: Dictionary = {
 	"sse_enabled": true,
 	"allow_remote": false,
 	"cors_origin": "*",
-	"auto_start": false,
-	"log_level": 2,
+	"auto_start": true,
+	"log_level": 3,
 	"security_level": 1,
 	"rate_limit": 100,
 	"language": "en"

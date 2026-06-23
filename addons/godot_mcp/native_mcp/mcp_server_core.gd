@@ -36,6 +36,62 @@ signal log_message(level: String, message: String)
 
 const JSONRPC_VERSION: String = "2.0"
 const PROTOCOL_VERSION: String = "2025-11-25"
+const DEFAULT_ENABLED_SUPPLEMENTARY_TOOLS: PackedStringArray = [
+	"open_scene",
+	"save_scene",
+	"get_scene_structure",
+	"list_project_scenes",
+	"get_editor_screenshot",
+	"reload_project",
+	"select_node",
+	"get_inspector_properties",
+	"validate_script",
+	"search_in_files",
+	"list_project_script_symbols",
+	"find_script_symbol_definition",
+	"find_script_symbol_references",
+	"open_script_at_line",
+	"get_performance_metrics",
+	"get_debugger_sessions",
+	"install_runtime_probe",
+	"remove_runtime_probe",
+	"get_runtime_info",
+	"get_runtime_scene_tree",
+	"inspect_runtime_node",
+	"update_runtime_node_property",
+	"call_runtime_node_method",
+	"evaluate_runtime_expression",
+	"await_runtime_condition",
+	"assert_runtime_condition",
+	"create_runtime_node",
+	"delete_runtime_node",
+	"simulate_runtime_input_event",
+	"simulate_runtime_input_action",
+	"list_runtime_input_actions",
+	"upsert_runtime_input_action",
+	"remove_runtime_input_action",
+	"list_runtime_animations",
+	"play_runtime_animation",
+	"stop_runtime_animation",
+	"get_runtime_animation_state",
+	"get_runtime_animation_tree_state",
+	"set_runtime_animation_tree_active",
+	"travel_runtime_animation_tree",
+	"get_runtime_material_state",
+	"get_runtime_theme_item",
+	"set_runtime_theme_override",
+	"clear_runtime_theme_override",
+	"get_runtime_shader_parameters",
+	"set_runtime_shader_parameter",
+	"list_runtime_tilemap_layers",
+	"get_runtime_tilemap_cell",
+	"set_runtime_tilemap_cell",
+	"list_runtime_audio_buses",
+	"get_runtime_audio_bus",
+	"update_runtime_audio_bus",
+	"get_runtime_screenshot",
+	"compare_render_screenshots",
+]
 
 # ============================================================================
 # 状态变量（使用完整类型提示 - 根据godot-dev-guide）
@@ -591,7 +647,7 @@ func register_tool(name: String, description: String,
 	tool.callable = callable
 	tool.category = category
 	tool.group = group
-	tool.enabled = (category == "core")
+	tool.enabled = (category == "core") or name in DEFAULT_ENABLED_SUPPLEMENTARY_TOOLS
 	
 	if not tool.is_valid():
 		var reason: String = "unknown"

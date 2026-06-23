@@ -3,6 +3,7 @@ extends Node
 signal tap(position: Vector2)
 
 var camera: Camera2D
+var background: Sprite2D
 var min_zoom := 1.0
 var max_zoom := 3.0
 
@@ -18,6 +19,9 @@ var _pinch_start_zoom := 1.0
 func setup(target_camera: Camera2D, initial_min_zoom: float):
 	camera = target_camera
 	min_zoom = initial_min_zoom
+
+func set_background(target_background: Sprite2D) -> void:
+	background = target_background
 
 func handle_input(event: InputEvent) -> bool:
 	if camera == null:
@@ -109,7 +113,7 @@ func _zoom_at(viewport_pos: Vector2, factor: float):
 func _clamp_camera():
 	if camera == null:
 		return
-	var bg := get_parent().get_node_or_null("Background") as Sprite2D
+	var bg := background
 	if bg == null or bg.texture == null:
 		return
 	var vp: Vector2 = get_viewport().get_visible_rect().size
