@@ -1,6 +1,22 @@
 sandbox_mode = "danger-full-access"
 approval_policy = "on-request"
 
+[mcp_servers.godot-mcp]
+url = "http://localhost:19080/mcp"
+enabled = true
+
+[mcp_servers.figma-desktop]
+url = "http://127.0.0.1:3845/mcp"
+
+[mcp_servers.codegraph]
+command = "codegraph"
+args = ["serve", "--mcp"]
+startup_timeout_sec = 120.0
+
+[mcp_servers.context7]
+command = "npx"
+args = ["-y", "@upstash/context7-mcp", "--api-key", "ctx7sk-62fe0b79-f5c0-4a81-8968-6c2918317796"]
+
 
 
 [mcp_servers.godot-mcp.tools.simulate_runtime_input_event]
