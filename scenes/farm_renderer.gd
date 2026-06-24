@@ -35,6 +35,7 @@ static func draw_world(render_ctx: Dictionary) -> void:
 	var tool_mode: int = int(render_ctx["tool_mode"])
 	var level: int = int(render_ctx["level"])
 	var gold: int = int(render_ctx["gold"])
+	var server_time: float = float(render_ctx["server_time"])
 	var sign_texture: Texture2D = render_ctx["sign_texture"]
 	var cn_font: Font = render_ctx["font"]
 	var vp: Vector2 = render_ctx["viewport_size"]
@@ -149,7 +150,7 @@ static func draw_world(render_ctx: Dictionary) -> void:
 					var bc := Color(0.2, 0.8, 0.3) if prog < 0.6 else Color(0.95, 0.75, 0.1)
 					draw_api._d_rect(Rect2(bx, by, bw * prog, 5), bc)
 					var stage_name: String
-					var remaining: int = int((1.0 - prog) * crop_catalog.get_grow_time(cid))
+					var remaining: int = _remaining_seconds(cell, server_time, prog, crop_catalog.get_grow_time(cid))
 					if prog < 0.15:
 						stage_name = "种子"
 					elif prog < 0.4:
@@ -253,7 +254,7 @@ static func _draw_crop_tooltip(draw_api, plot_positions: Array, hcell: Dictionar
 		draw_api._draw_text(tx + 26, ty + 62, "售价: " + str(crop_catalog.get_unit_sell(hid)) + " 金/个", 11, Color(1, 0.88, 0.15))
 		action_hint = "点击收获!" if tool_mode == 3 else ("点击铲除作物" if tool_mode == 4 else "切换到收获模式")
 	else:
-		var time_left: int = int((1.0 - server_hprog) * crop_catalog.get_grow_time(hid))
+		var time_left: int = _remaining_seconds(hcell, float(hcell.get("client_server_time", Time.get_unix_time_from_system())), hprog, crop_catalog.get_grow_time(hid))
 		draw_api._draw_text(tx + 26, ty + 62, "剩余时间: " + str(time_left) + "秒", 11, Color(0.7, 0.8, 1.0))
 		var hws: int = int(hcell.get("water_state", 0))
 		var hbc: int = int(hcell.get("bug_count", 0))
@@ -455,6 +456,13 @@ static func _get_growth_stage(progress: float, render_stage_thresholds: Array) -
 	if progress < float(render_stage_thresholds[3]):
 		return 2
 	return 2
+
+static func _remaining_seconds(cell: Dictionary, server_time: float, progress: float, grow_time: float) -> int:
+	var fallback := maxf((1.0 - progress) * grow_time, 0.0)
+	var mature_at := float(cell.get("estimated_mature_at", 0.0))
+	var remaining := mature_at - server_time if mature_at > 0.0 else fallback
+	remaining = minf(maxf(remaining, 0.0), fallback)
+	return maxi(0, int(ceil(remaining)))
 
 static func _crop_color(crop_colors: Array, crop_id: int, color_index: int) -> Color:
 	if crop_id >= 0 and crop_id < crop_colors.size():

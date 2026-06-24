@@ -13,9 +13,43 @@ command = "codegraph"
 args = ["serve", "--mcp"]
 startup_timeout_sec = 120.0
 
+[mcp_servers.codegraph.tools.codegraph_explore]
+approval_mode = "approve"
+
+[mcp_servers.codegraph.tools.codegraph_node]
+approval_mode = "approve"
+
 [mcp_servers.context7]
 command = "npx"
 args = ["-y", "@upstash/context7-mcp", "--api-key", "ctx7sk-62fe0b79-f5c0-4a81-8968-6c2918317796"]
+
+[mcp_servers.postgres]
+command = "/home/user/.nvm/versions/node/v24.17.0/bin/npx"
+args = [
+  "-y",
+  "@modelcontextprotocol/server-postgres",
+  "postgresql://postgres:postgres@127.0.0.1:5433/qqfarm?sslmode=disable"
+]
+startup_timeout_sec = 120
+
+[mcp_servers.postgres.tools.query]
+approval_mode = "approve"
+
+[mcp_servers.RedisMCPServer]
+command = "uvx"
+args = [
+  "--from",
+  "redis-mcp-server@latest",
+  "redis-mcp-server",
+  "--url",
+  "redis://127.0.0.1:6380/0"
+]
+
+[mcp_servers.RedisMCPServer.tools.dbsize]
+approval_mode = "approve"
+
+[mcp_servers.RedisMCPServer.tools.scan_all_keys]
+approval_mode = "approve"
 
 
 

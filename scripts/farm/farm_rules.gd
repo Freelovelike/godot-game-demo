@@ -56,7 +56,7 @@ static func _empty_cell_intent(plot_index: int, tool_mode: int, selected_seed: i
 		return {"type": INTENT_OPEN_WAREHOUSE}
 	if selected_seed >= 0:
 		return _server_action("plant", {"plot_index": plot_index, "crop_id": selected_seed})
-	return _toast("请先选择种子!", 1.5)
+	return _toast("请先打开背包选择种子!", 1.5)
 
 static func _crop_cell_intent(plot_index: int, tool_mode: int, selected_fertilizer: int) -> Dictionary:
 	match tool_mode:

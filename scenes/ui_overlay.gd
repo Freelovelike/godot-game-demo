@@ -134,7 +134,7 @@ func _build_tool_toolbar():
 	toolbar.offset_bottom = 78.0
 	toolbar.add_theme_constant_override("separation", 8)
 	add_child(toolbar)
-	var names := ["普通", "浇水", "施肥", "收获", "铲除", "全铲", "除虫", "除草", "全收", "仓库"]
+	var names := ["普通", "浇水", "施肥", "收获", "铲除", "全铲", "除虫", "除草", "全收", "背包"]
 	for i in range(names.size()):
 		var button := Button.new()
 		button.custom_minimum_size = Vector2(58, 68)

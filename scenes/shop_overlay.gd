@@ -15,27 +15,19 @@ var fertilizer_inventory: Dictionary = {}:
 	set(v):
 		fertilizer_inventory = v
 		_refresh_dynamic()
-var selected_seed: int = -1:
-	set(v):
-		selected_seed = v
-		_refresh_dynamic()
 var selected_fertilizer: int = -1:
 	set(v):
 		selected_fertilizer = v
 		_refresh_dynamic()
 
-signal seed_selected(index: int)
 signal fertilizer_selected(index: int)
-signal crop_sell_requested(crop_id: int, amount: int)
 signal fertilizer_buy_requested(fert_id: int)
 signal closed
 
 const FERT_DESC := ["生长-8%", "生长-12%", "生长-18%", "2h不缺水", "2h不生虫", "2h不长草", "产量+10%"]
 
 var _seed_grid: GridContainer = null
-var _seed_chip_box: HBoxContainer = null # 复用 GridContainer 放选择 chip
 var _fert_list: VBoxContainer = null
-var _seed_chips: Array = [] # PanelContainer per crop
 var _fert_rows: Array = []  # Label(已有/已选) per fert
 
 func _ready():
@@ -53,9 +45,7 @@ func _build():
 	for c in get_children():
 		c.queue_free()
 	_seed_grid = null
-	_seed_chip_box = null
 	_fert_list = null
-	_seed_chips.clear()
 	_fert_rows.clear()
 
 	var modal := UIKit.build_modal(self, Vector2(900, 640), "商店",
@@ -89,7 +79,7 @@ func _build_seed_tab() -> Control:
 	root.add_child(scroll)
 
 	var grid := GridContainer.new()
-	grid.columns = 6
+	grid.columns = 5
 	grid.add_theme_constant_override("h_separation", 6)
 	grid.add_theme_constant_override("v_separation", 4)
 	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -97,24 +87,11 @@ func _build_seed_tab() -> Control:
 	_seed_grid = grid
 
 	# 表头
-	for h in ["名称", "种子价", "产量x单价", "生长", "利润", "操作"]:
+	for h in ["名称", "种子价", "产量x单价", "生长", "利润"]:
 		grid.add_child(UIKit.make_label(h, 14, Color(0.3, 0.22, 0.1)))
 
 	for i in range(CROPS.size()):
 		_add_seed_row(grid, i)
-
-	# 底部：选择种植种子
-	root.add_child(HSeparator.new())
-	root.add_child(UIKit.make_label("选择种植种子:", 14, Color(0.3, 0.22, 0.1)))
-	var chip_grid := GridContainer.new()
-	chip_grid.columns = 5
-	chip_grid.add_theme_constant_override("h_separation", 8)
-	chip_grid.add_theme_constant_override("v_separation", 8)
-	root.add_child(chip_grid)
-	for i in range(CROPS.size()):
-		var chip := _make_seed_chip(i)
-		chip_grid.add_child(chip)
-		_seed_chips.append(chip)
 
 	return root
 
@@ -135,48 +112,6 @@ func _add_seed_row(grid: GridContainer, i: int):
 	grid.add_child(UIKit.make_label(str(int(_crop_grow_time(i))) + "秒", 13, Color(0.18, 0.18, 0.5)))
 	var profit: int = _crop_base_yield(i) * _crop_unit_sell(i) - _crop_seed_cost(i)
 	grid.add_child(UIKit.make_label("+" + str(profit), 14, Color(0, 0.55, 0)))
-
-	# 操作按钮
-	var ops := HBoxContainer.new()
-	ops.add_theme_constant_override("separation", 4)
-	var buy := UIKit.make_button("购买", Color(0.22, 0.62, 0.28), Color(0.14, 0.42, 0.18), 13)
-	buy.pressed.connect(func(): seed_selected.emit(i))
-	ops.add_child(buy)
-	var sell := UIKit.make_button("卖出", Color(0.76, 0.5, 0.12), Color(0.5, 0.32, 0.06), 13)
-	sell.pressed.connect(func(): crop_sell_requested.emit(i, 1))
-	ops.add_child(sell)
-	var sellall := UIKit.make_button("全卖", Color(0.62, 0.24, 0.18), Color(0.42, 0.14, 0.1), 13)
-	sellall.pressed.connect(func(): crop_sell_requested.emit(i, int(inventory.get(i, 0))))
-	ops.add_child(sellall)
-	grid.add_child(ops)
-
-func _make_seed_chip(i: int) -> PanelContainer:
-	var chip := PanelContainer.new()
-	chip.custom_minimum_size = Vector2(160, 44)
-	chip.mouse_filter = Control.MOUSE_FILTER_STOP
-	chip.gui_input.connect(func(e: InputEvent):
-		var mb := e as InputEventMouseButton
-		if mb and mb.pressed and mb.button_index == MOUSE_BUTTON_LEFT:
-			seed_selected.emit(i)
-	)
-	var m := MarginContainer.new()
-	m.add_theme_constant_override("margin_left", 6)
-	m.add_theme_constant_override("margin_right", 6)
-	chip.add_child(m)
-	var hb := HBoxContainer.new()
-	hb.add_theme_constant_override("separation", 6)
-	m.add_child(hb)
-	var dot := ColorRect.new()
-	dot.custom_minimum_size = Vector2(18, 18)
-	dot.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	dot.color = _crop_color(i, 1)
-	hb.add_child(dot)
-	var vb := VBoxContainer.new()
-	vb.add_theme_constant_override("separation", 0)
-	hb.add_child(vb)
-	vb.add_child(UIKit.make_label(_crop_name(i), 15, Color(0.1, 0.1, 0.1)))
-	vb.add_child(UIKit.make_label(str(_crop_seed_cost(i)) + "金", 11, Color(0.4, 0.35, 0.2)))
-	return chip
 
 func _build_fert_tab() -> Control:
 	var scroll := ScrollContainer.new()
@@ -229,13 +164,6 @@ func _make_fert_row(i: int) -> PanelContainer:
 
 ## 根据当前数据刷新高亮 / 数量等动态部分（不重建整个树）。
 func _refresh_dynamic():
-	# 种子选择高亮
-	for i in range(_seed_chips.size()):
-		var chip: PanelContainer = _seed_chips[i]
-		if i == selected_seed:
-			chip.add_theme_stylebox_override("panel", UIKit.card_box(Color(0.78, 0.95, 0.78), Color(0.15, 0.6, 0.15)))
-		else:
-			chip.add_theme_stylebox_override("panel", UIKit.card_box(Color(0.82, 0.78, 0.65), Color(0.6, 0.55, 0.4)))
 	# 肥料已有 / 已选
 	for i in range(_fert_rows.size()):
 		var lbl: Label = _fert_rows[i]

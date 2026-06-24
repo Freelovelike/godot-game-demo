@@ -95,6 +95,7 @@ var reclaim_confirm_row := -1
 var reset_confirm_open := false
 var settings_open := false
 var warehouse_open := false
+var seed_bar_scroll := 0.0
 var shovel_all_confirm_open := false
 
 var toast_text := ""
@@ -102,6 +103,11 @@ var toast_timer := 0.0
 var save_timer := 0.0
 var event_check_timer := 0.0
 var _game_time := 0.0 # 游戏内累计秒数，用于保护期判断
+var _server_time_offset := 0.0
+var _time_sync_timer := 0.0
+var _cloud_sync_timer := 0.0
+var _cloud_load_pending := false
+var _suppress_next_load_toast := false
 
 # Auth state (set from Login scene)
 var auth_token := ""
@@ -109,8 +115,8 @@ var user_info := {}
 var farm_api: FarmApiClient
 var camera_controller: Node
 var _save_pending := false # 云端保存中
+var _save_again_after_pending := false
 var _config_loaded := false
-var _pending_sell_crop_id := -1
 
 # Camera 拖拽缩放
 var cam: Camera2D
@@ -177,6 +183,7 @@ func _ready():
 	farm_api.save_completed.connect(_on_save_response)
 	farm_api.action_completed.connect(_on_action_response)
 	farm_api.sell_completed.connect(_on_sell_response)
+	farm_api.time_completed.connect(_on_time_response)
 	_get_systems_node().add_child(farm_api)
 
 	# Camera for pan/zoom
@@ -265,7 +272,18 @@ func _load_remote_config():
 		_config_loaded = true
 		_load_game()
 		return
+	farm_api.request_time()
 	farm_api.request_config()
+
+func _on_time_response(result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray):
+	if result != HTTPRequest.RESULT_SUCCESS or response_code != 200:
+		return
+	var parsed = JSON.parse_string(body.get_string_from_utf8())
+	if not (parsed is Dictionary) or int(parsed.get("code", -1)) != 0:
+		return
+	var data: Dictionary = parsed.get("data", {})
+	if data.has("server_time"):
+		_sync_server_time(float(data["server_time"]))
 
 func _on_config_response(result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray):
 	if result == HTTPRequest.RESULT_SUCCESS and response_code == 200:
@@ -354,19 +372,6 @@ func _init_overlays():
 	shop.FERTILIZERS = FERTILIZERS
 	shop.crop_catalog = crop_catalog
 	shop.fertilizer_catalog = fertilizer_catalog
-	shop.seed_selected.connect(func(i: int):
-		selected_seed = i
-		state.selected_seed = i
-		toast_text = "已选择种子: " + crop_catalog.get_name(i)
-		toast_timer = 1.5
-		shop.selected_seed = i
-		shop.queue_redraw()
-	)
-	shop.crop_sell_requested.connect(func(cid: int, amount: int):
-		_send_sell(cid, amount)
-		_sync_shop_data(shop)
-		shop.queue_redraw()
-	)
 	shop.fertilizer_buy_requested.connect(func(fi: int):
 		_send_action("buy_fertilizer", {"fert_id": fi})
 		_sync_shop_data(shop)
@@ -379,6 +384,7 @@ func _init_overlays():
 		toast_timer = 1.5
 		_sync_shop_data(shop)
 		shop.queue_redraw()
+		_cloud_save()
 	)
 	shop.closed.connect(func():
 		shop.visible = false
@@ -431,7 +437,6 @@ func _init_overlays():
 func _sync_shop_data(shop):
 	shop.inventory = inventory
 	shop.fertilizer_inventory = fertilizer_inventory
-	shop.selected_seed = selected_seed
 	shop.selected_fertilizer = selected_fertilizer
 	shop.crop_catalog = crop_catalog
 	shop.fertilizer_catalog = fertilizer_catalog
@@ -460,24 +465,12 @@ func _sync_all_overlays():
 func _send_sell(crop_id: int, count: int):
 	if count <= 0 or not is_instance_valid(farm_api):
 		return
-	_pending_sell_crop_id = crop_id
-	farm_api.request_sell(crop_id, count)
+	_send_action("sell", {"crop_id": crop_id, "count": count})
 
 func _on_sell_response(result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray):
 	if result == HTTPRequest.RESULT_SUCCESS and response_code == 200:
 		var parsed = JSON.parse_string(body.get_string_from_utf8())
 		if parsed is Dictionary and int(parsed.get("code", -1)) == 0:
-			var d: Dictionary = parsed.get("data", {})
-			var next_gold := int(d.get("gold", gold))
-			var sold: int = int(d.get("sold_count", 0))
-			var earned: int = int(d.get("gold_earned", 0))
-			var crop_id := _pending_sell_crop_id
-			_pending_sell_crop_id = -1
-			if crop_id >= 0:
-				state.apply_sell_result(crop_id, sold, next_gold)
-				_copy_state_from_model()
-				toast_text = "售出 " + crop_catalog.get_name(crop_id) + " x" + str(sold) + "，获得 " + str(earned) + " 金币"
-				toast_timer = 1.5
 			_cloud_load()
 
 func _initialize_default_state():
@@ -642,13 +635,9 @@ func in_diamond(px: float, py: float, cx: float, cy: float) -> bool:
 func _process(delta: float):
 	if farm.is_empty() or farm.size() < ROWS:
 		return
+	_update_sync_timers(delta)
 	_update_visual_progress(delta)
 
-	save_timer += delta
-	if save_timer >= 30.0:
-		save_timer = 0.0
-		if not auth_token.is_empty():
-			_cloud_load() # 定期从服务端同步最新状态
 	if toast_timer > 0.0:
 		toast_timer -= delta
 		if toast_timer <= 0.0:
@@ -658,18 +647,74 @@ func _process(delta: float):
 	if _ui_overlay and is_instance_valid(_ui_overlay):
 		_ui_overlay.queue_redraw()
 
+func _local_unix_time() -> float:
+	return float(Time.get_unix_time_from_system())
+
+func _estimated_server_time() -> float:
+	return _local_unix_time() + _server_time_offset
+
+func _sync_server_time(server_time: float) -> void:
+	_server_time_offset = server_time - _local_unix_time()
+	_time_sync_timer = 0.0
+
+func _update_sync_timers(delta: float) -> void:
+	if auth_token.is_empty() or not is_instance_valid(farm_api):
+		return
+	_time_sync_timer += delta
+	if _time_sync_timer >= 60.0:
+		_time_sync_timer = 0.0
+		farm_api.request_time()
+
+	_cloud_sync_timer += delta
+	var interval := _next_cloud_sync_interval()
+	if _cloud_sync_timer >= interval:
+		_cloud_sync_timer = 0.0
+		_cloud_load(true)
+
+func _next_cloud_sync_interval() -> float:
+	var now := _estimated_server_time()
+	var nearest_remaining := INF
+	for r in range(ROWS):
+		if farm[r].size() < COLS:
+			return 30.0
+		for c in range(COLS):
+			var cell: Dictionary = farm[r][c]
+			if int(cell.get("crop_id", -1)) < 0 or float(cell.get("progress", 0.0)) >= 1.0:
+				continue
+			var mature_at := float(cell.get("estimated_mature_at", 0.0))
+			if mature_at <= 0.0:
+				continue
+			nearest_remaining = minf(nearest_remaining, mature_at - now)
+	if nearest_remaining <= 3.0:
+		return 1.0
+	if nearest_remaining <= 10.0:
+		return 2.0
+	if nearest_remaining <= 30.0:
+		return 5.0
+	return 30.0
+
 func _update_visual_progress(delta: float):
 	if auth_token.is_empty():
 		return
+	var now := _estimated_server_time()
 	for r in range(ROWS):
 		if farm[r].size() < COLS:
 			return
 		for c in range(COLS):
 			var cell: Dictionary = farm[r][c]
+			cell["client_server_time"] = now
 			var cid: int = int(cell.get("crop_id", -1))
 			var server_progress := clampf(float(cell.get("progress", 0.0)), 0.0, 1.0)
 			if cid < 0 or cid >= CROPS.size() or server_progress >= 1.0:
 				cell["visual_progress"] = server_progress
+				continue
+			var mature_at := float(cell.get("estimated_mature_at", 0.0))
+			if mature_at > now:
+				var synced_at := float(cell.get("progress_synced_at", now))
+				var span := maxf(mature_at - synced_at, 0.001)
+				var predicted := server_progress + (1.0 - server_progress) * clampf((now - synced_at) / span, 0.0, 1.0)
+				var visual_progress := maxf(float(cell.get("visual_progress", server_progress)), server_progress)
+				cell["visual_progress"] = clampf(maxf(visual_progress, predicted), server_progress, 0.999)
 				continue
 			var grow_time := maxf(crop_catalog.get_grow_time(cid), 0.001)
 			var visual_progress := maxf(float(cell.get("visual_progress", server_progress)), server_progress)
@@ -686,10 +731,18 @@ func _set_tool_mode(mode: int):
 	tool_mode = clampi(mode, 0, TOOL_ICON_TEXTURES.size() - 1)
 	state.tool_mode = tool_mode
 	_apply_tool_cursor()
+	_cloud_save()
 
 func _on_ui_tool_mode_requested(index: int):
+	if index == 9:
+		warehouse_open = not warehouse_open
+		mouse_held = false
+		toast_text = "选择种子" if warehouse_open else ""
+		toast_timer = 1.0 if warehouse_open else 0.0
+		queue_redraw()
+		return
 	_set_tool_mode(index)
-	var mode_names := ["普通", "浇水", "施肥", "收获", "铲除", "全铲", "除虫", "除草", "全收", "仓库"]
+	var mode_names := ["普通", "浇水", "施肥", "收获", "铲除", "全铲", "除虫", "除草", "全收", "背包"]
 	toast_text = "切换到: " + mode_names[tool_mode] + "模式"
 	toast_timer = 1.0
 	_sync_ui_overlay_view_model()
@@ -735,7 +788,6 @@ func _build_ui_overlay_view_model() -> Dictionary:
 		"top_buttons_blocked": reclaim_confirm_open \
 				or shovel_all_confirm_open \
 				or reset_confirm_open \
-				or warehouse_open \
 				or shop_open \
 				or inventory_open \
 				or settings_open,
@@ -787,11 +839,27 @@ func _input(event: InputEvent):
 			queue_redraw()
 			return
 
-	if camera_controller != null and camera_controller.handle_input(event):
+	var vp: Vector2 = get_viewport().get_visible_rect().size
+
+	if event is InputEventMouseButton and _is_tool_toolbar_point(event.position):
+		_consume_world_input()
 		queue_redraw()
 		return
 
-	var vp: Vector2 = get_viewport().get_visible_rect().size
+	if event is InputEventMouseButton and warehouse_open and _handle_seed_bar_mouse_button(event):
+		queue_redraw()
+		return
+
+	if event is InputEventMouseMotion and _is_world_input_blocked_at(event.position):
+		hover_col = -1
+		hover_row = -1
+		_consume_world_input()
+		queue_redraw()
+		return
+
+	if camera_controller != null and camera_controller.handle_input(event):
+		queue_redraw()
+		return
 
 	# --- Mouse button up ---
 	if event is InputEventMouseButton and not event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
@@ -823,10 +891,9 @@ func _input(event: InputEvent):
 						hover_col = col
 						hover_row = row
 		# Drag action: if mouse held and moved to a NEW tile, do action
-		if mouse_held and hover_col >= 0 and not shop_open and not inventory_open and not reclaim_confirm_open and not reset_confirm_open and not settings_open and not warehouse_open and not shovel_all_confirm_open:
+		if mouse_held and hover_col >= 0 and not shop_open and not inventory_open and not reclaim_confirm_open and not reset_confirm_open and not settings_open and not shovel_all_confirm_open:
 			if hover_col != last_action_col or hover_row != last_action_row:
-				if not ctx_batch_action.is_empty():
-					_execute_context_action(hover_col, hover_row, ctx_batch_action)
+				_do_tile_action(hover_col, hover_row)
 				last_action_col = hover_col
 				last_action_row = hover_row
 		queue_redraw()
@@ -849,33 +916,6 @@ func _input(event: InputEvent):
 		if reclaim_confirm_open or shovel_all_confirm_open or reset_confirm_open:
 			return
 
-		# Check warehouse overlay (屏幕坐标)
-		if warehouse_open:
-			var ww := 360.0; var wh := 300.0
-			var wox := (vp.x - ww) / 2; var woy := (vp.y - wh) / 2
-			if mx < wox or mx > wox + ww or my < woy or my > woy + wh:
-				warehouse_open = false; queue_redraw(); return
-			return
-
-		# Check context menu
-		if ctx_menu_open:
-			var ctx_wp := _get_plot_position(ctx_col, ctx_row)
-			var vp_pos = (ctx_wp - cam.position) * cam.zoom + vp * 0.5
-			var menu_w = ctx_menu_items.size() * 50 + 10
-			var menu_rect = _ctx_menu_rect(vp_pos)
-			if _point_in_rect(Vector2(mx, my), menu_rect):
-				var clicked_idx = int((mx - (menu_rect.position.x + 5)) / 50.0)
-				if clicked_idx >= 0 and clicked_idx < ctx_menu_items.size():
-					ctx_batch_action = ctx_menu_items[clicked_idx].duplicate()
-					mouse_held = true
-					last_action_col = ctx_col
-					last_action_row = ctx_row
-					_execute_context_action(ctx_col, ctx_row, ctx_batch_action)
-				return
-			else:
-				ctx_menu_open = false
-				queue_redraw()
-
 		# Check grid tiles (世界坐标) — 找最近的匹配地块
 		var best_col := -1
 		var best_row := -1
@@ -893,7 +933,7 @@ func _input(event: InputEvent):
 						best_row = row
 		if best_col >= 0:
 			mouse_held = true
-			_open_context_menu(best_col, best_row)
+			_do_tile_action(best_col, best_row)
 			last_action_col = best_col
 			last_action_row = best_row
 			queue_redraw()
@@ -1024,13 +1064,26 @@ func _open_top_toolbar_overlay(index: int):
 func _handle_click(screen_pos: Vector2):
 	var vp: Vector2 = get_viewport().get_visible_rect().size
 	var viewport_pos := _window_to_viewport_pos(screen_pos)
+	if warehouse_open:
+		var fake_seed := InputEventMouseButton.new()
+		fake_seed.button_index = MOUSE_BUTTON_LEFT
+		fake_seed.pressed = true
+		fake_seed.position = viewport_pos
+		fake_seed.global_position = viewport_pos
+		if _handle_seed_bar_mouse_button(fake_seed):
+			queue_redraw()
+			return
+	if _is_tool_toolbar_point(viewport_pos):
+		_consume_world_input()
+		queue_redraw()
+		return
 	var mx: float = viewport_pos.x
 	var my: float = viewport_pos.y
 	# overlay 打开时，不处理触屏点击（overlay 有自己的 _input 处理）
 	if shop_open or inventory_open or settings_open:
 		return
 	# 确认框（复用鼠标逻辑）
-	if reclaim_confirm_open or shovel_all_confirm_open or warehouse_open or reset_confirm_open:
+	if reclaim_confirm_open or shovel_all_confirm_open or reset_confirm_open:
 		# 模拟左键点击，让已有逻辑处理
 		var fake := InputEventMouseButton.new()
 		fake.button_index = MOUSE_BUTTON_LEFT
@@ -1100,6 +1153,8 @@ func _on_action_response(result: int, response_code: int, _headers: PackedString
 		toast_timer = 1.5
 		return
 	var data: Dictionary = resp.get("data", {})
+	if data.has("server_time"):
+		_sync_server_time(float(data["server_time"]))
 	var msg: String = str(data.get("message", ""))
 	if not msg.is_empty():
 		toast_text = msg
@@ -1110,6 +1165,7 @@ func _apply_state(data: Dictionary):
 	_copy_client_state_to_model()
 	state.apply_server_state(data)
 	_copy_state_from_model()
+	_apply_tool_cursor()
 	_sync_all_overlays()
 	queue_redraw()
 
@@ -1153,6 +1209,79 @@ func _reset_save_data():
 func _point_in_rect(point: Vector2, rect: Rect2) -> bool:
 	return point.x >= rect.position.x and point.x <= rect.position.x + rect.size.x and point.y >= rect.position.y and point.y <= rect.position.y + rect.size.y
 
+func _is_world_input_blocked_at(viewport_pos: Vector2) -> bool:
+	return _is_tool_toolbar_point(viewport_pos) or _is_seed_bar_point(viewport_pos)
+
+func _is_tool_toolbar_point(viewport_pos: Vector2) -> bool:
+	if _ui_overlay == null or not is_instance_valid(_ui_overlay):
+		return false
+	var toolbar := _ui_overlay.get_node_or_null("ToolToolbar") as Control
+	if toolbar == null or not toolbar.visible:
+		return false
+	return toolbar.get_global_rect().has_point(viewport_pos)
+
+func _is_context_menu_point(viewport_pos: Vector2) -> bool:
+	if not ctx_menu_open:
+		return false
+	var vp: Vector2 = get_viewport().get_visible_rect().size
+	var ctx_wp := _get_plot_position(ctx_col, ctx_row)
+	var ctx_vp_pos = (ctx_wp - cam.position) * cam.zoom + vp * 0.5
+	return _point_in_rect(viewport_pos, _ctx_menu_rect(ctx_vp_pos))
+
+func _seed_bar_rect() -> Rect2:
+	var vp: Vector2 = get_viewport().get_visible_rect().size
+	return Rect2(132.0, vp.y - 276.0, maxf(vp.x - 264.0, 320.0), 94.0)
+
+func _is_seed_bar_point(viewport_pos: Vector2) -> bool:
+	return warehouse_open and _point_in_rect(viewport_pos, _seed_bar_rect())
+
+func _handle_seed_bar_mouse_button(event: InputEventMouseButton) -> bool:
+	var pos := event.position
+	if event.button_index == MOUSE_BUTTON_WHEEL_UP or event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+		if not _is_seed_bar_point(pos):
+			return false
+		var max_scroll := _seed_bar_max_scroll()
+		seed_bar_scroll = clampf(seed_bar_scroll + (-80.0 if event.button_index == MOUSE_BUTTON_WHEEL_UP else 80.0), 0.0, max_scroll)
+		return true
+	if not event.pressed or event.button_index != MOUSE_BUTTON_LEFT:
+		return false
+	var rect := _seed_bar_rect()
+	if not _point_in_rect(pos, rect):
+		warehouse_open = false
+		return true
+	if _point_in_rect(pos, Rect2(rect.position.x + 8, rect.position.y + 28, 34, 42)):
+		seed_bar_scroll = clampf(seed_bar_scroll - 160.0, 0.0, _seed_bar_max_scroll())
+		return true
+	if _point_in_rect(pos, Rect2(rect.end.x - 42, rect.position.y + 28, 34, 42)):
+		seed_bar_scroll = clampf(seed_bar_scroll + 160.0, 0.0, _seed_bar_max_scroll())
+		return true
+	var item_x := rect.position.x + 52.0 - seed_bar_scroll
+	for cid in range(CROPS.size()):
+		var item_rect := Rect2(item_x + cid * 82.0, rect.position.y + 18.0, 72.0, 64.0)
+		if _point_in_rect(pos, item_rect):
+			selected_seed = cid
+			state.selected_seed = cid
+			tool_mode = 0
+			state.tool_mode = tool_mode
+			warehouse_open = false
+			toast_text = "已选择种子: " + crop_catalog.get_name(cid)
+			toast_timer = 1.5
+			_apply_tool_cursor()
+			_cloud_save()
+			return true
+	return true
+
+func _seed_bar_max_scroll() -> float:
+	var rect := _seed_bar_rect()
+	var content_w := float(CROPS.size()) * 82.0
+	var visible_w := maxf(rect.size.x - 104.0, 1.0)
+	return maxf(content_w - visible_w, 0.0)
+
+func _consume_world_input() -> void:
+	mouse_held = false
+	last_action_col = -1
+	last_action_row = -1
+	ctx_batch_action.clear()
 
 func _get_unlocked_plot_count() -> int:
 	return state.get_unlocked_plot_count()
@@ -1161,8 +1290,11 @@ func _get_next_locked_plot() -> Vector2i:
 	return state.get_next_locked_plot()
 
 func _save_game(show_toast := true):
-	# 服务端权威：游戏状态由 /farm/action 改动，这里只回传客户端偏好（选中种子/工具）。
-	if not is_instance_valid(farm_api) or _save_pending:
+	# 服务端权威：游戏状态由 /farm/action 改动，这里只回传客户端偏好。
+	if not is_instance_valid(farm_api):
+		return
+	if _save_pending:
+		_save_again_after_pending = true
 		return
 	_save_pending = true
 	farm_api.request_save(_build_save_payload())
@@ -1175,6 +1307,9 @@ func _cloud_save():
 
 func _on_save_response(_result: int, _response_code: int, _headers: PackedStringArray, _body: PackedByteArray):
 	_save_pending = false
+	if _save_again_after_pending:
+		_save_again_after_pending = false
+		_save_game(false)
 
 func _build_save_payload() -> Dictionary:
 	_copy_client_state_to_model()
@@ -1186,26 +1321,39 @@ func _load_game():
 	# 服务端权威：始终从云端加载
 	_cloud_load()
 
-func _cloud_load():
+func _cloud_load(silent := false):
 	if not is_instance_valid(farm_api):
 		return
+	if _cloud_load_pending:
+		return
+	_cloud_load_pending = true
+	_suppress_next_load_toast = silent
 	farm_api.request_load()
 
 func _on_load_response(result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray):
+	_cloud_load_pending = false
 	if result != HTTPRequest.RESULT_SUCCESS or response_code != 200:
+		_suppress_next_load_toast = false
 		return # 云端失败，保留本地数据
 	var parsed = JSON.parse_string(body.get_string_from_utf8())
 	if not (parsed is Dictionary):
+		_suppress_next_load_toast = false
 		return
 	var resp: Dictionary = parsed
 	if int(resp.get("code", -1)) != 0:
+		_suppress_next_load_toast = false
 		return
 	var d: Dictionary = resp.get("data", {})
 	if d.is_empty():
+		_suppress_next_load_toast = false
 		return
+	if d.has("server_time"):
+		_sync_server_time(float(d["server_time"]))
 	_apply_cloud_data(d)
-	toast_text = "云端存档已同步"
-	toast_timer = 2.0
+	if not _suppress_next_load_toast:
+		toast_text = "云端存档已同步"
+		toast_timer = 2.0
+	_suppress_next_load_toast = false
 
 func _apply_cloud_data(data: Dictionary):
 	_apply_state(data)
@@ -1242,6 +1390,7 @@ func _build_render_context() -> Dictionary:
 		"tool_mode": tool_mode,
 		"level": level,
 		"gold": gold,
+		"server_time": _estimated_server_time(),
 		"sign_texture": _sign_texture,
 		"font": _cn_font,
 		"viewport_size": get_viewport().get_visible_rect().size,
@@ -1251,7 +1400,6 @@ func _build_render_context() -> Dictionary:
 				and not settings_open \
 				and not reclaim_confirm_open \
 				and not reset_confirm_open \
-				and not warehouse_open \
 				and not shovel_all_confirm_open,
 	}
 
@@ -1270,7 +1418,7 @@ func _draw_modal_ui(caller: CanvasItem):
 	_ui_draw_target = caller
 	var vp: Vector2 = get_viewport().get_visible_rect().size
 
-	_draw_context_menu_overlay(vp)
+	_draw_seed_bar_overlay(vp)
 
 	_ui_draw_target = null
 
@@ -1282,11 +1430,8 @@ func _draw_context_menu_overlay(vp: Vector2):
 	var menu_w = ctx_menu_items.size() * 50 + 10
 	var menu_rect = _ctx_menu_rect(vp_pos)
 
-	# 画胶囊形状的半透明黑底
-	var r = 30.0
-	_d_circle(Vector2(menu_rect.position.x + r, menu_rect.position.y + r), r, Color(0, 0, 0, 0.65))
-	_d_circle(Vector2(menu_rect.position.x + menu_w - r, menu_rect.position.y + r), r, Color(0, 0, 0, 0.65))
-	_d_rect(Rect2(menu_rect.position.x + r, menu_rect.position.y, menu_w - 2 * r, 60), Color(0, 0, 0, 0.65))
+	# 轻量工具条背景，避免少量按钮时形成突兀的黑色圆盘。
+	_d_rect(Rect2(menu_rect.position.x + 4, menu_rect.position.y + 9, menu_w - 8, 42), Color(0.04, 0.035, 0.025, 0.38))
 
 	# 画小箭头朝上指向地块（菜单在作物下方）
 	var arrow_pts: PackedVector2Array = PackedVector2Array([
@@ -1294,12 +1439,15 @@ func _draw_context_menu_overlay(vp: Vector2):
 		Vector2(vp_pos.x, menu_rect.position.y - 8),
 		Vector2(vp_pos.x + 8, menu_rect.position.y),
 	])
-	_d_colored_polygon(arrow_pts, Color(0, 0, 0, 0.65))
+	_d_colored_polygon(arrow_pts, Color(0.04, 0.035, 0.025, 0.38))
 	
 	for i in range(ctx_menu_items.size()):
 		var item = ctx_menu_items[i]
 		var ix = menu_rect.position.x + 5 + i * 50
 		var iy = menu_rect.position.y + 5
+		var button_rect := Rect2(ix + 4, iy + 4, 42, 42)
+		_d_rect(button_rect, Color(0.94, 0.88, 0.68, 0.82))
+		_d_rect(button_rect, Color(0.34, 0.24, 0.10, 0.45), false, 1.0)
 		
 		if item["icon"] != null:
 			var isz = item["icon"].get_size()
@@ -1307,6 +1455,33 @@ func _draw_context_menu_overlay(vp: Vector2):
 			var idraw_sz = isz * iscale
 			var idraw_pos = Vector2(ix + 25 - idraw_sz.x * 0.5, iy + 25 - idraw_sz.y * 0.5)
 			_d_texture_rect(item["icon"], Rect2(idraw_pos, idraw_sz), false)
+
+func _draw_seed_bar_overlay(_vp: Vector2) -> void:
+	if not warehouse_open:
+		return
+	var rect := _seed_bar_rect()
+	_d_rect(rect, Color(0.92, 0.95, 0.86, 0.78))
+	_d_rect(rect, Color(0.46, 0.38, 0.16, 0.45), false, 2.0)
+	_draw_text(rect.position.x + 18, rect.position.y + 8, "选择种子", 18, Color(0.24, 0.18, 0.08))
+	var left_rect := Rect2(rect.position.x + 8, rect.position.y + 28, 34, 42)
+	var right_rect := Rect2(rect.end.x - 42, rect.position.y + 28, 34, 42)
+	_d_rect(left_rect, Color(0.76, 0.68, 0.38, 0.78))
+	_d_rect(right_rect, Color(0.76, 0.68, 0.38, 0.78))
+	_draw_text(left_rect.position.x + 10, left_rect.position.y + 8, "<", 24, Color(0.18, 0.12, 0.04))
+	_draw_text(right_rect.position.x + 10, right_rect.position.y + 8, ">", 24, Color(0.18, 0.12, 0.04))
+	seed_bar_scroll = clampf(seed_bar_scroll, 0.0, _seed_bar_max_scroll())
+	var item_x := rect.position.x + 52.0 - seed_bar_scroll
+	for cid in range(CROPS.size()):
+		var item_rect := Rect2(item_x + cid * 82.0, rect.position.y + 18.0, 72.0, 64.0)
+		if item_rect.end.x < rect.position.x + 46.0 or item_rect.position.x > rect.end.x - 46.0:
+			continue
+		var selected := cid == selected_seed
+		_d_rect(item_rect, Color(0.98, 0.94, 0.76, 0.92) if selected else Color(1, 1, 1, 0.78))
+		_d_rect(item_rect, Color(0.18, 0.58, 0.18, 0.85) if selected else Color(0.48, 0.38, 0.18, 0.42), false, 2.0 if selected else 1.0)
+		var texture := _get_crop_seed_texture(cid)
+		if texture != null:
+			_draw_ui_seed_thumbnail(Rect2(item_rect.position.x + 11, item_rect.position.y + 6, 50, 36), texture)
+		_draw_text(item_rect.position.x + 8, item_rect.position.y + 42, crop_catalog.get_name(cid), 10, Color(0.18, 0.12, 0.06))
 
 func _get_texture_avg_color(texture: Texture2D) -> Color:
 	var image := texture.get_image()

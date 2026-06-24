@@ -48,6 +48,9 @@ func create_empty_cell(col: int, row: int) -> Dictionary:
 	var initial_land_level := 1 if get_plot_index(col, row) < INITIAL_UNLOCKED_PLOTS else LAND_LEVEL_LOCKED
 	return {
 		"crop_id": -1,
+		"planted_at": 0.0,
+		"estimated_mature_at": 0.0,
+		"progress_synced_at": 0.0,
 		"progress": 0.0,
 		"visual_progress": 0.0,
 		"wet_timer": 0.0,
@@ -103,6 +106,10 @@ func apply_server_state(data: Dictionary) -> void:
 	exp_val = int(data.get("exp_val", exp_val))
 	exp_to_level = int(data.get("exp_to_level", exp_to_level))
 	game_time = float(data.get("game_time", game_time))
+	selected_seed = int(data.get("selected_seed", selected_seed))
+	tool_mode = int(data.get("tool_mode", tool_mode))
+	selected_fertilizer = int(data.get("selected_fertilizer", selected_fertilizer))
+	var server_time := float(data.get("server_time", game_time))
 	if data.has("inventory") and (data["inventory"] is Dictionary):
 		inventory = _normalize_inventory_keys(data["inventory"])
 	if data.has("fertilizer_inventory") and (data["fertilizer_inventory"] is Dictionary):
@@ -110,9 +117,9 @@ func apply_server_state(data: Dictionary) -> void:
 		for key in data["fertilizer_inventory"].keys():
 			fertilizer_inventory[int(key)] = int(data["fertilizer_inventory"][key])
 	if data.has("plots") and (data["plots"] is Array):
-		_apply_plots(data["plots"])
+		_apply_plots(data["plots"], server_time)
 
-func _apply_plots(plots: Array) -> void:
+func _apply_plots(plots: Array, server_time: float) -> void:
 	for plot in plots:
 		if not (plot is Dictionary):
 			continue
@@ -122,14 +129,31 @@ func _apply_plots(plots: Array) -> void:
 		var row: int = int(plot_index / cols)
 		var col: int = plot_index % cols
 		var cell: Dictionary = farm[row][col]
+		var previous_crop_id := int(cell.get("crop_id", -1))
+		var previous_planted_at := float(cell.get("planted_at", 0.0))
+		var previous_mature_at := float(cell.get("estimated_mature_at", 0.0))
+		var previous_visual_progress := clampf(float(cell.get("visual_progress", cell.get("progress", 0.0))), 0.0, 1.0)
 		cell["unlocked"] = bool(plot.get("unlocked", false))
 		cell["land_level"] = int(plot.get("land_level", 0))
 		cell["land_work"] = int(plot.get("land_work", 0))
 		var crop_id_raw = plot.get("crop_id", null)
-		cell["crop_id"] = int(crop_id_raw) if crop_id_raw != null else -1
+		var next_crop_id := int(crop_id_raw) if crop_id_raw != null else -1
+		var planted_at := float(plot.get("planted_at", 0.0))
+		var same_planting := next_crop_id >= 0 \
+				and previous_crop_id == next_crop_id \
+				and previous_planted_at > 0.0 \
+				and planted_at > 0.0 \
+				and absf(previous_planted_at - planted_at) < 0.001
+		cell["crop_id"] = next_crop_id
+		cell["planted_at"] = planted_at
+		var mature_at := float(plot.get("estimated_mature_at", 0.0))
+		if same_planting and previous_mature_at > 0.0 and mature_at > previous_mature_at:
+			mature_at = previous_mature_at
+		cell["estimated_mature_at"] = mature_at
 		var progress := clampf(float(plot.get("progress", 0.0)), 0.0, 1.0)
 		cell["progress"] = progress
-		cell["visual_progress"] = progress
+		cell["visual_progress"] = maxf(progress, previous_visual_progress) if same_planting and progress < 1.0 else progress
+		cell["progress_synced_at"] = server_time
 		cell["wet_timer"] = maxf(float(plot.get("wet_timer", 0.0)), 0.0)
 		cell["water_state"] = int(plot.get("water_state", 0))
 		cell["dry_timer"] = maxf(float(plot.get("dry_timer", 0.0)), 0.0)
@@ -155,6 +179,7 @@ func build_save_payload() -> Dictionary:
 	return {
 		"selected_seed": selected_seed,
 		"tool_mode": tool_mode,
+		"selected_fertilizer": selected_fertilizer,
 	}
 
 func _normalize_inventory_keys(raw_inventory: Dictionary) -> Dictionary:

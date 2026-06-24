@@ -10,8 +10,10 @@ signal load_completed(result: int, response_code: int, headers: PackedStringArra
 signal save_completed(result: int, response_code: int, headers: PackedStringArray, body: PackedByteArray)
 signal action_completed(result: int, response_code: int, headers: PackedStringArray, body: PackedByteArray)
 signal sell_completed(result: int, response_code: int, headers: PackedStringArray, body: PackedByteArray)
+signal time_completed(result: int, response_code: int, headers: PackedStringArray, body: PackedByteArray)
 
 const REQUEST_TIMEOUT := 120.0
+const TIME_PATH := "/time"
 const CONFIG_PATH := "/farm/config"
 const LOAD_PATH := "/farm/load"
 const SAVE_PATH := "/farm/save"
@@ -25,6 +27,7 @@ var _load_http: HTTPRequest
 var _save_http: HTTPRequest
 var _action_http: HTTPRequest
 var _sell_http: HTTPRequest
+var _time_http: HTTPRequest
 
 func _ready():
 	_ensure_ready()
@@ -37,6 +40,7 @@ func _ensure_ready() -> void:
 	_save_http = _make_http(save_completed)
 	_action_http = _make_http(action_completed)
 	_sell_http = _make_http(sell_completed)
+	_time_http = _make_http(time_completed)
 
 func _make_http(done_signal: Signal) -> HTTPRequest:
 	var req := HTTPRequest.new()
@@ -51,6 +55,10 @@ func _make_http(done_signal: Signal) -> HTTPRequest:
 func request_config():
 	_ensure_ready()
 	_request_get(_config_http, CONFIG_PATH)
+
+func request_time():
+	_ensure_ready()
+	_request_get(_time_http, TIME_PATH)
 
 func request_load():
 	_ensure_ready()
