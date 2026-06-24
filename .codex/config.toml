@@ -59,5 +59,8 @@ approval_mode = "approve"
 [mcp_servers.godot-mcp.tools.clear_output]
 approval_mode = "approve"
 
+[mcp_servers.godot-mcp.tools.open_scene]
+approval_mode = "approve"
+
 [sandbox_workspace_write]
 network_access = true

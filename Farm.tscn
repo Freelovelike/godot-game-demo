@@ -5,10 +5,20 @@
 [ext_resource type="Script" uid="uid://cvqrvr61gl6bb" path="res://scripts/plot_anchor_tile.gd" id="2_xqpul"]
 [ext_resource type="Texture2D" uid="uid://c757hbirnn8dc" path="res://assets/land/land_yellow_dry.png" id="3_x7wqs"]
 [ext_resource type="Script" uid="uid://b1g2altukveho" path="res://scripts/plot_anchor_preview.gd" id="3_xqpul"]
-[ext_resource type="Script" uid="uid://bd86ujxkhygu6" path="res://scenes/shop_overlay.gd" id="4_shop"]
+[ext_resource type="Script" uid="uid://cd426eq0a4cfs" path="res://scenes/shop_overlay.gd" id="4_shop"]
 [ext_resource type="Script" uid="uid://icb6jwsfnmay" path="res://scenes/inventory_overlay.gd" id="5_inv"]
 [ext_resource type="Script" uid="uid://beyp1oibeun62" path="res://scenes/settings_overlay.gd" id="6_set"]
 [ext_resource type="Script" uid="uid://c7oss3wsofpr2" path="res://scenes/ui_overlay.gd" id="7_ui"]
+[ext_resource type="Texture2D" uid="uid://c1xh2da522rf4" path="res://assets/sangdiansucai/商店背景框_带标题.png" id="8_shop_bg"]
+[ext_resource type="Texture2D" uid="uid://5idcq31j3xcc" path="res://assets/sangdiansucai/商店关闭按钮.png" id="10_shop_close"]
+[ext_resource type="Texture2D" uid="uid://bkpco73tpbpy" path="res://assets/sangdiansucai/商店种子按钮_未激活.png" id="11_shop_seed"]
+[ext_resource type="Texture2D" uid="uid://bgr13cu7y4fju" path="res://assets/sangdiansucai/商店肥料按钮_未激活.png" id="12_shop_fert"]
+[ext_resource type="Texture2D" uid="uid://b3x6558lbnhr6" path="res://assets/sangdiansucai/种好田卖好价黑板招牌.png" id="13_shop_board"]
+[ext_resource type="Texture2D" uid="uid://blmxcm11ktfp3" path="res://assets/sangdiansucai/木栅栏花草装饰.png" id="14_shop_fence"]
+[ext_resource type="Texture2D" uid="uid://dxbasaystxqa2" path="res://assets/sangdiansucai/星星金币.png" id="16_shop_coin"]
+[ext_resource type="Texture2D" uid="uid://bynv6oitfc8wq" path="res://assets/sangdiansucai/蓝宝石.png" id="17_shop_gem"]
+[ext_resource type="Texture2D" uid="uid://cydnivasymf2o" path="res://assets/sangdiansucai/商店种子按钮_激活.png" id="18_shop_seed_active"]
+[ext_resource type="Texture2D" uid="uid://d1fm3jnw67oyj" path="res://assets/sangdiansucai/商店肥料按钮_激活.png" id="19_shop_fert_active"]
 
 [node name="Farm" type="Node2D" unique_id=1337986768]
 script = ExtResource("1_farm")
@@ -796,14 +806,154 @@ mouse_filter = 2
 script = ExtResource("7_ui")
 
 [node name="ShopOverlay" type="Control" parent="UILayer" unique_id=135957798]
-visible = false
 layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_bottom = 204.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("4_shop")
+
+[node name="Shade" type="ColorRect" parent="UILayer/ShopOverlay" unique_id=2017953301]
+layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-script = ExtResource("4_shop")
+color = Color(0, 0, 0, 0.36)
+
+[node name="Root" type="Control" parent="UILayer/ShopOverlay" unique_id=721634539]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -364.0
+offset_top = -452.0
+offset_right = 676.0
+offset_bottom = 513.71423
+grow_horizontal = 2
+grow_vertical = 2
+scale = Vector2(0.7, 0.7)
+mouse_filter = 2
+
+[node name="Background" type="TextureRect" parent="UILayer/ShopOverlay/Root" unique_id=822583746]
+layout_mode = 1
+offset_left = 70.0
+offset_top = 58.0
+offset_right = 970.0
+offset_bottom = 897.0
+texture = ExtResource("8_shop_bg")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="SeedButtonClip" type="Control" parent="UILayer/ShopOverlay/Root" unique_id=1702793448]
+clip_contents = true
+layout_mode = 1
+anchors_preset = 0
+offset_left = 166.0
+offset_top = 269.0
+offset_right = 318.0
+offset_bottom = 319.0
+
+[node name="SeedButton" type="TextureButton" parent="UILayer/ShopOverlay/Root/SeedButtonClip" unique_id=1214525237]
+layout_mode = 1
+offset_right = 152.0
+offset_bottom = 62.0
+texture_normal = ExtResource("11_shop_seed")
+texture_disabled = ExtResource("18_shop_seed_active")
+ignore_texture_size = true
+stretch_mode = 0
+
+[node name="FertButtonClip" type="Control" parent="UILayer/ShopOverlay/Root" unique_id=688230097]
+clip_contents = true
+layout_mode = 1
+anchors_preset = 0
+offset_left = 317.0
+offset_top = 269.0
+offset_right = 469.0
+offset_bottom = 319.0
+
+[node name="FertButton" type="TextureButton" parent="UILayer/ShopOverlay/Root/FertButtonClip" unique_id=1556169427]
+layout_mode = 1
+offset_right = 152.0
+offset_bottom = 62.0
+texture_normal = ExtResource("12_shop_fert")
+texture_disabled = ExtResource("19_shop_fert_active")
+ignore_texture_size = true
+stretch_mode = 0
+
+[node name="CloseButton" type="TextureButton" parent="UILayer/ShopOverlay/Root" unique_id=855618973]
+layout_mode = 1
+offset_left = 858.71423
+offset_top = 176.85721
+offset_right = 932.71423
+offset_bottom = 250.85721
+texture_normal = ExtResource("10_shop_close")
+ignore_texture_size = true
+stretch_mode = 5
+
+[node name="SeedTable" type="GridContainer" parent="UILayer/ShopOverlay/Root" unique_id=1377646021]
+layout_mode = 1
+offset_left = 152.0
+offset_top = 340.0
+offset_right = 888.0
+offset_bottom = 730.0
+columns = 6
+
+[node name="FertTable" type="GridContainer" parent="UILayer/ShopOverlay/Root" unique_id=1105618963]
+visible = false
+layout_mode = 1
+offset_left = 152.0
+offset_top = 340.0
+offset_right = 888.0
+offset_bottom = 730.0
+columns = 5
+
+[node name="Fence" type="TextureRect" parent="UILayer/ShopOverlay/Root" unique_id=754810127]
+layout_mode = 1
+offset_left = 26.857147
+offset_top = 822.7141
+offset_right = 176.85715
+offset_bottom = 910.7141
+texture = ExtResource("14_shop_fence")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Board" type="TextureRect" parent="UILayer/ShopOverlay/Root" unique_id=1667761159]
+layout_mode = 1
+offset_left = 862.8572
+offset_top = 792.28564
+offset_right = 992.8572
+offset_bottom = 934.28564
+texture = ExtResource("13_shop_board")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Coin" type="TextureRect" parent="UILayer/ShopOverlay/Root" unique_id=487411090]
+visible = false
+layout_mode = 1
+offset_left = 174.0
+offset_top = 692.0
+offset_right = 220.0
+offset_bottom = 738.0
+texture = ExtResource("16_shop_coin")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Gem" type="TextureRect" parent="UILayer/ShopOverlay/Root" unique_id=1724443476]
+visible = false
+layout_mode = 1
+offset_left = 224.0
+offset_top = 694.0
+offset_right = 266.0
+offset_bottom = 736.0
+texture = ExtResource("17_shop_gem")
+expand_mode = 1
+stretch_mode = 5
 
 [node name="InventoryOverlay" type="Control" parent="UILayer" unique_id=1584534584]
 visible = false

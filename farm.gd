@@ -372,6 +372,17 @@ func _init_overlays():
 	shop.FERTILIZERS = FERTILIZERS
 	shop.crop_catalog = crop_catalog
 	shop.fertilizer_catalog = fertilizer_catalog
+	shop.seed_buy_requested.connect(func(cid: int):
+		selected_seed = cid
+		state.selected_seed = cid
+		tool_mode = 0
+		state.tool_mode = tool_mode
+		toast_text = "已选择种子: " + crop_catalog.get_name(cid) + "，种植时扣金币"
+		toast_timer = 1.8
+		_apply_tool_cursor()
+		_sync_shop_data(shop)
+		_cloud_save()
+	)
 	shop.fertilizer_buy_requested.connect(func(fi: int):
 		_send_action("buy_fertilizer", {"fert_id": fi})
 		_sync_shop_data(shop)
@@ -1230,7 +1241,8 @@ func _is_context_menu_point(viewport_pos: Vector2) -> bool:
 
 func _seed_bar_rect() -> Rect2:
 	var vp: Vector2 = get_viewport().get_visible_rect().size
-	return Rect2(132.0, vp.y - 276.0, maxf(vp.x - 264.0, 320.0), 94.0)
+	var width := minf(640.0, maxf(vp.x - 96.0, 320.0))
+	return Rect2((vp.x - width) * 0.5, vp.y - 276.0, width, 104.0)
 
 func _is_seed_bar_point(viewport_pos: Vector2) -> bool:
 	return warehouse_open and _point_in_rect(viewport_pos, _seed_bar_rect())
@@ -1249,6 +1261,9 @@ func _handle_seed_bar_mouse_button(event: InputEventMouseButton) -> bool:
 	if not _point_in_rect(pos, rect):
 		warehouse_open = false
 		return true
+	if _point_in_rect(pos, _seed_bar_close_rect(rect)):
+		warehouse_open = false
+		return true
 	if _point_in_rect(pos, Rect2(rect.position.x + 8, rect.position.y + 28, 34, 42)):
 		seed_bar_scroll = clampf(seed_bar_scroll - 160.0, 0.0, _seed_bar_max_scroll())
 		return true
@@ -1263,7 +1278,6 @@ func _handle_seed_bar_mouse_button(event: InputEventMouseButton) -> bool:
 			state.selected_seed = cid
 			tool_mode = 0
 			state.tool_mode = tool_mode
-			warehouse_open = false
 			toast_text = "已选择种子: " + crop_catalog.get_name(cid)
 			toast_timer = 1.5
 			_apply_tool_cursor()
@@ -1276,6 +1290,9 @@ func _seed_bar_max_scroll() -> float:
 	var content_w := float(CROPS.size()) * 82.0
 	var visible_w := maxf(rect.size.x - 104.0, 1.0)
 	return maxf(content_w - visible_w, 0.0)
+
+func _seed_bar_close_rect(rect: Rect2) -> Rect2:
+	return Rect2(rect.end.x - 30.0, rect.position.y + 8.0, 22.0, 22.0)
 
 func _consume_world_input() -> void:
 	mouse_held = false
@@ -1463,12 +1480,18 @@ func _draw_seed_bar_overlay(_vp: Vector2) -> void:
 	_d_rect(rect, Color(0.92, 0.95, 0.86, 0.78))
 	_d_rect(rect, Color(0.46, 0.38, 0.16, 0.45), false, 2.0)
 	_draw_text(rect.position.x + 18, rect.position.y + 8, "选择种子", 18, Color(0.24, 0.18, 0.08))
+	var close_rect := _seed_bar_close_rect(rect)
+	_d_rect(close_rect, Color(0.75, 0.18, 0.12, 0.82))
+	_d_rect(close_rect, Color(0.45, 0.08, 0.06, 0.65), false, 1.0)
+	_draw_text(close_rect.position.x + 5, close_rect.position.y + 1, "x", 18, Color.WHITE)
 	var left_rect := Rect2(rect.position.x + 8, rect.position.y + 28, 34, 42)
 	var right_rect := Rect2(rect.end.x - 42, rect.position.y + 28, 34, 42)
 	_d_rect(left_rect, Color(0.76, 0.68, 0.38, 0.78))
 	_d_rect(right_rect, Color(0.76, 0.68, 0.38, 0.78))
 	_draw_text(left_rect.position.x + 10, left_rect.position.y + 8, "<", 24, Color(0.18, 0.12, 0.04))
 	_draw_text(right_rect.position.x + 10, right_rect.position.y + 8, ">", 24, Color(0.18, 0.12, 0.04))
+	var viewport_rect := Rect2(rect.position.x + 48, rect.position.y + 18, rect.size.x - 96, 70)
+	_d_rect(viewport_rect, Color(1, 1, 1, 0.24))
 	seed_bar_scroll = clampf(seed_bar_scroll, 0.0, _seed_bar_max_scroll())
 	var item_x := rect.position.x + 52.0 - seed_bar_scroll
 	for cid in range(CROPS.size()):
@@ -1482,6 +1505,13 @@ func _draw_seed_bar_overlay(_vp: Vector2) -> void:
 		if texture != null:
 			_draw_ui_seed_thumbnail(Rect2(item_rect.position.x + 11, item_rect.position.y + 6, 50, 36), texture)
 		_draw_text(item_rect.position.x + 8, item_rect.position.y + 42, crop_catalog.get_name(cid), 10, Color(0.18, 0.12, 0.06))
+	var max_scroll := _seed_bar_max_scroll()
+	if max_scroll > 0.0:
+		var track := Rect2(viewport_rect.position.x, rect.end.y - 12.0, viewport_rect.size.x, 4.0)
+		var thumb_w := maxf(track.size.x * minf(track.size.x / (track.size.x + max_scroll), 1.0), 36.0)
+		var thumb_x := track.position.x + (track.size.x - thumb_w) * (seed_bar_scroll / max_scroll)
+		_d_rect(track, Color(0.25, 0.20, 0.10, 0.28))
+		_d_rect(Rect2(thumb_x, track.position.y, thumb_w, track.size.y), Color(0.36, 0.28, 0.12, 0.72))
 
 func _get_texture_avg_color(texture: Texture2D) -> Color:
 	var image := texture.get_image()
