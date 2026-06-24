@@ -4,6 +4,6 @@
 
 [node name="Login" type="Control"]
 layout_mode = 0
-offset_right = 1448.0
-offset_bottom = 1086.0
+offset_right = 1080.0
+offset_bottom = 800.0
 script = ExtResource("1_login")

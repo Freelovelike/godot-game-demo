@@ -2,7 +2,16 @@ extends Control
 
 ## UI overlay — draws HUD / toolbar / toast in screen space, unaffected by Camera2D.
 
-var farm_ref: Node = null
+signal top_button_requested(index: int)
+signal tool_mode_requested(index: int)
+signal reclaim_cancel_requested
+signal reclaim_confirm_requested
+signal reset_cancel_requested
+signal reset_confirm_requested
+signal shovel_all_cancel_requested
+signal shovel_all_confirm_requested
+signal overlay_draw_requested(caller: CanvasItem)
+
 var _cn_font: Font = null
 var _hud_gold: Label
 var _hud_level: Label
@@ -16,6 +25,7 @@ var _reclaim_level: Label
 var _reclaim_cost: Label
 var _reset_modal: Control
 var _shovel_modal: Control
+var _view_model: Dictionary = {}
 
 const TOOL_ICON_TEXTURES: Array[Texture2D] = [
 	null,
@@ -124,7 +134,7 @@ func _build_tool_toolbar():
 	toolbar.offset_bottom = 78.0
 	toolbar.add_theme_constant_override("separation", 8)
 	add_child(toolbar)
-	var names := ["普通", "浇水", "施肥", "收获", "铲除", "全铲", "除虫", "除草", "全收", "仓库"]
+	var names := ["普通", "浇水", "施肥", "收获", "铲除", "全铲", "除虫", "除草", "全收", "背包"]
 	for i in range(names.size()):
 		var button := Button.new()
 		button.custom_minimum_size = Vector2(58, 68)
@@ -168,10 +178,9 @@ func _build_confirm_modals():
 	reclaim_box.add_child(_reclaim_cost)
 	reclaim_box.add_child(_make_label_with_text("确认花费金币开垦这块土地吗？", 14, Color(0.28, 0.22, 0.18)))
 	reclaim_box.add_child(_make_button_row("取消", "确认", func():
-		farm_ref._close_reclaim_confirm()
+		reclaim_cancel_requested.emit()
 	, func():
-		farm_ref._try_reclaim_plot(farm_ref.reclaim_confirm_col, farm_ref.reclaim_confirm_row)
-		farm_ref._close_reclaim_confirm()
+		reclaim_confirm_requested.emit()
 	))
 	add_child(_reclaim_modal)
 
@@ -181,11 +190,9 @@ func _build_confirm_modals():
 	reset_box.add_child(_make_label_with_text("重置后会立即覆盖旧存档，重新进入游戏也不会恢复。", 14, Color(0.45, 0.2, 0.3)))
 	reset_box.add_child(_make_label_with_text("确认要新开档吗？", 15, Color(0.55, 0.18, 0.18)))
 	reset_box.add_child(_make_button_row("取消", "确认重置", func():
-		farm_ref.reset_confirm_open = false
-		farm_ref.queue_redraw()
+		reset_cancel_requested.emit()
 	, func():
-		farm_ref.reset_confirm_open = false
-		farm_ref._reset_save_data()
+		reset_confirm_requested.emit()
 	))
 	add_child(_reset_modal)
 
@@ -193,11 +200,9 @@ func _build_confirm_modals():
 	var shovel_box := _shovel_modal.get_node("Panel/Margin/VBox") as VBoxContainer
 	shovel_box.add_child(_make_label_with_text("这将铲除所有地块上的作物，且不可恢复。", 14, Color(0.28, 0.22, 0.18)))
 	shovel_box.add_child(_make_button_row("取消", "确认铲除", func():
-		farm_ref.shovel_all_confirm_open = false
-		farm_ref.queue_redraw()
+		shovel_all_cancel_requested.emit()
 	, func():
-		farm_ref.shovel_all_confirm_open = false
-		farm_ref._send_action("shovel_all")
+		shovel_all_confirm_requested.emit()
 	))
 	add_child(_shovel_modal)
 
@@ -308,66 +313,50 @@ func _make_label(font_size: int, color: Color) -> Label:
 	return label
 
 func _on_top_button_pressed(index: int):
-	if farm_ref == null or not is_instance_valid(farm_ref):
-		return
 	# 有弹窗/确认框开着时，顶部按钮不响应（否则 Button 节点会穿透弹窗）
-	if farm_ref.reclaim_confirm_open \
-			or farm_ref.shovel_all_confirm_open \
-			or farm_ref.reset_confirm_open \
-			or farm_ref.warehouse_open \
-			or farm_ref.shop_open \
-			or farm_ref.inventory_open \
-			or farm_ref.settings_open:
+	if bool(_view_model.get("top_buttons_blocked", false)):
 		return
-	if farm_ref.has_method("_open_top_toolbar_overlay"):
-		farm_ref._open_top_toolbar_overlay(index)
+	top_button_requested.emit(index)
 
 func _on_tool_button_pressed(index: int):
-	if farm_ref == null or not is_instance_valid(farm_ref):
-		return
-	if farm_ref.has_method("_set_tool_mode"):
-		farm_ref._set_tool_mode(index)
-		var mode_names := ["普通", "浇水", "施肥", "收获", "铲除", "全铲", "除虫", "除草", "全收", "仓库"]
-		farm_ref.toast_text = "切换到: " + mode_names[index] + "模式"
-		farm_ref.toast_timer = 1.0
-		queue_redraw()
+	tool_mode_requested.emit(index)
+
+func update_view_model(view_model: Dictionary):
+	_view_model = view_model
+	queue_redraw()
 
 func _draw():
-	if farm_ref == null or not is_instance_valid(farm_ref):
-		return
 	_update_hud()
 	_update_toolbar()
 	_update_toast()
 	_update_confirm_modals()
-	if farm_ref.has_method("_draw_modal_ui"):
-		farm_ref._draw_modal_ui(self)
+	overlay_draw_requested.emit(self)
 
 func _update_hud():
-	_hud_gold.text = "金币: " + str(farm_ref.gold)
-	_hud_level.text = "Lv." + str(farm_ref.level)
-	_hud_exp.text = str(farm_ref.exp_val) + "/" + str(farm_ref.exp_to_level)
-	_hud_land.text = "地:" + str(farm_ref._get_unlocked_plot_count()) + "/30"
+	_hud_gold.text = "金币: " + str(_view_model.get("gold", 0))
+	_hud_level.text = "Lv." + str(_view_model.get("level", 1))
+	_hud_exp.text = str(_view_model.get("exp_val", 0)) + "/" + str(_view_model.get("exp_to_level", 100))
+	_hud_land.text = "地:" + str(_view_model.get("unlocked_plot_count", 0)) + "/" + str(_view_model.get("plot_count", 30))
 
 func _update_toolbar():
+	var tool_mode: int = int(_view_model.get("tool_mode", 0))
 	for i in range(_tool_buttons.size()):
 		var button := _tool_buttons[i]
-		button.button_pressed = farm_ref.tool_mode == i
+		button.button_pressed = tool_mode == i
 		if i < TOOL_ICON_TEXTURES.size():
 			button.icon = TOOL_ICON_TEXTURES[i]
 
 func _update_toast():
-	_toast.visible = farm_ref.toast_text != ""
-	_toast.text = farm_ref.toast_text
-	_toast.modulate.a = minf(farm_ref.toast_timer, 1.0)
+	var toast_text := str(_view_model.get("toast_text", ""))
+	_toast.visible = toast_text != ""
+	_toast.text = toast_text
+	_toast.modulate.a = minf(float(_view_model.get("toast_timer", 0.0)), 1.0)
 
 func _update_confirm_modals():
-	_reclaim_modal.visible = farm_ref.reclaim_confirm_open
-	_reset_modal.visible = farm_ref.reset_confirm_open
-	_shovel_modal.visible = farm_ref.shovel_all_confirm_open
-	if farm_ref.reclaim_confirm_open:
-		var col: int = farm_ref.reclaim_confirm_col
-		var row: int = farm_ref.reclaim_confirm_row
-		var plot_no: int = farm_ref._get_plot_index(col, row) + 1
-		_reclaim_title.text = "第 " + str(plot_no) + " 块地"
-		_reclaim_level.text = "需要等级: " + str(farm_ref._get_reclaim_level(col, row))
-		_reclaim_cost.text = "开垦费用: " + str(farm_ref._get_reclaim_cost(col, row)) + " 金币"
+	_reclaim_modal.visible = bool(_view_model.get("reclaim_confirm_open", false))
+	_reset_modal.visible = bool(_view_model.get("reset_confirm_open", false))
+	_shovel_modal.visible = bool(_view_model.get("shovel_all_confirm_open", false))
+	if _reclaim_modal.visible:
+		_reclaim_title.text = "第 " + str(int(_view_model.get("reclaim_plot_no", 0))) + " 块地"
+		_reclaim_level.text = "需要等级: " + str(int(_view_model.get("reclaim_level", 0)))
+		_reclaim_cost.text = "开垦费用: " + str(int(_view_model.get("reclaim_cost", 0))) + " 金币"
