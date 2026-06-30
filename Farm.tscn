@@ -806,6 +806,7 @@ mouse_filter = 2
 script = ExtResource("7_ui")
 
 [node name="ShopOverlay" type="Control" parent="UILayer" unique_id=135957798]
+visible = false
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
