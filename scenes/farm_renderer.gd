@@ -24,12 +24,8 @@ static func draw_world(render_ctx: Dictionary) -> void:
 	var land_texture_avg_colors: Dictionary = render_ctx["land_texture_avg_colors"]
 	var plot_positions: Array = render_ctx["plot_positions"]
 	var hover: Vector2i = render_ctx["hover"]
-	var context_tile: Vector2i = render_ctx["context_tile"]
 	var hover_col: int = hover.x
 	var hover_row: int = hover.y
-	var ctx_menu_open: bool = bool(render_ctx["context_menu_open"])
-	var ctx_col: int = context_tile.x
-	var ctx_row: int = context_tile.y
 	var selected_seed: int = int(render_ctx["selected_seed"])
 	var selected_fertilizer: int = int(render_ctx["selected_fertilizer"])
 	var tool_mode: int = int(render_ctx["tool_mode"])
@@ -59,7 +55,7 @@ static func draw_world(render_ctx: Dictionary) -> void:
 			var cell: Dictionary = farm[row][col]
 			_draw_land_tile(draw_api, state, TW, TH, tile_gap, vcorners, cell, land_textures, land_texture_source_rects, land_texture_avg_colors)
 
-			if (col == hover_col and row == hover_row) or (ctx_menu_open and col == ctx_col and row == ctx_row):
+			if col == hover_col and row == hover_row:
 				if not state.is_cell_unlocked(cell):
 					draw_api._d_colored_polygon(vcorners, Color(0.75, 0.75, 0.75, 0.22))
 				elif cell["crop_id"] == -1 and selected_seed >= 0:
@@ -69,7 +65,7 @@ static func draw_world(render_ctx: Dictionary) -> void:
 				else:
 					draw_api._d_colored_polygon(vcorners, Color(1, 1, 1, 0.1))
 
-			if (col == hover_col and row == hover_row) or (ctx_menu_open and col == ctx_col and row == ctx_row):
+			if col == hover_col and row == hover_row:
 				var bcol := Color(1, 0.9, 0.2, 0.9)
 				for i in range(4):
 					draw_api._d_line(vcorners[i], vcorners[(i + 1) % 4], bcol, 2.0)

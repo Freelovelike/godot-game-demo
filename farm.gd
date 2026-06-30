@@ -37,10 +37,6 @@ var land_texture_avg_colors: Dictionary = {}
 var _cursor_cache: Array[ImageTexture] = []
 var _sign_texture: Texture2D = null
 
-var ctx_menu_open: bool = false
-var ctx_col: int = -1
-var ctx_row: int = -1
-var ctx_menu_items: Array = []
 var ctx_batch_action: Dictionary = {}
 
 # ===================== Iso Farm 2.5D =====================
@@ -971,82 +967,6 @@ func _execute_tile_intent(intent: Dictionary):
 			shovel_all_confirm_open = true
 			queue_redraw()
 
-func _ctx_menu_rect(vp_pos: Vector2) -> Rect2:
-	# 菜单放在地块（作物）正下方，箭头朝上指向作物。
-	# vp_pos 为地块中心屏幕坐标；TH*0.5 为地块半高，乘以缩放再留一点间距。
-	var menu_w := ctx_menu_items.size() * 50 + 10
-	var menu_h := 60.0
-	var below_y := vp_pos.y + (TH * 0.5) * cam.zoom.y + 14.0
-	return Rect2(vp_pos.x - menu_w * 0.5, below_y, menu_w, menu_h)
-
-func _open_context_menu(col: int, row: int):
-	if row < 0 or col < 0 or farm.is_empty() or row >= farm.size() or col >= farm[row].size():
-		return
-	var cell: Dictionary = farm[row][col]
-	if not _is_cell_unlocked(cell):
-		var next_locked := _get_next_locked_plot()
-		if next_locked.x != col or next_locked.y != row:
-			toast_text = "请按顺序先开垦下一块土地"
-			toast_timer = 1.8
-			return
-		_open_reclaim_confirm(col, row)
-		return
-		
-	ctx_col = col
-	ctx_row = row
-	ctx_menu_items.clear()
-	for spec in FarmRules.context_menu_item_specs(state, col, row, CROPS.size()):
-		ctx_menu_items.append(_context_menu_item_with_icon(spec))
-		
-	ctx_menu_open = true
-	queue_redraw()
-
-func _context_menu_item_with_icon(spec: Dictionary) -> Dictionary:
-	var item := spec.duplicate(true)
-	match str(item.get("type", "")):
-		"plant":
-			item["icon"] = _get_crop_seed_texture(int(item.get("crop_id", -1)))
-		"harvest":
-			item["icon"] = TOOL_ICON_TEXTURES[3]
-		"weed":
-			item["icon"] = TOOL_ICON_TEXTURES[7]
-		"pest":
-			item["icon"] = TOOL_ICON_TEXTURES[6]
-		"water":
-			item["icon"] = TOOL_ICON_TEXTURES[1]
-		"fertilize":
-			item["icon"] = TOOL_ICON_TEXTURES[2]
-		"shovel":
-			item["icon"] = TOOL_ICON_TEXTURES[4]
-	return item
-
-func _execute_context_action(col: int, row: int, item: Dictionary):
-	if row < 0 or col < 0 or row >= ROWS or col >= COLS or not item.has("type"):
-		return
-	var pi = row * COLS + col
-	var t = item["type"]
-	if t == "plant":
-		_send_action("plant", {"plot_index": pi, "crop_id": item["crop_id"]})
-	elif t == "harvest":
-		_send_action("harvest", {"plot_index": pi})
-	elif t == "water":
-		_send_action("water", {"plot_index": pi})
-	elif t == "fertilize":
-		if selected_fertilizer >= 0:
-			_send_action("fertilize", {"plot_index": pi, "fert_id": selected_fertilizer})
-		else:
-			toast_text = "请先在商店购买并选择肥料"
-			toast_timer = 1.5
-	elif t == "weed":
-		_send_action("remove_weed", {"plot_index": pi})
-	elif t == "pest":
-		_send_action("remove_bug", {"plot_index": pi})
-	elif t == "shovel":
-		_send_action("shovel", {"plot_index": pi})
-		
-	ctx_menu_open = false
-	queue_redraw()
-
 func _open_top_toolbar_overlay(index: int):
 	mouse_held = false
 	match index:
@@ -1231,14 +1151,6 @@ func _is_tool_toolbar_point(viewport_pos: Vector2) -> bool:
 		return false
 	return toolbar.get_global_rect().has_point(viewport_pos)
 
-func _is_context_menu_point(viewport_pos: Vector2) -> bool:
-	if not ctx_menu_open:
-		return false
-	var vp: Vector2 = get_viewport().get_visible_rect().size
-	var ctx_wp := _get_plot_position(ctx_col, ctx_row)
-	var ctx_vp_pos = (ctx_wp - cam.position) * cam.zoom + vp * 0.5
-	return _point_in_rect(viewport_pos, _ctx_menu_rect(ctx_vp_pos))
-
 func _seed_bar_rect() -> Rect2:
 	var vp: Vector2 = get_viewport().get_visible_rect().size
 	var width := minf(640.0, maxf(vp.x - 96.0, 320.0))
@@ -1400,8 +1312,6 @@ func _build_render_context() -> Dictionary:
 		"land_texture_avg_colors": land_texture_avg_colors,
 		"plot_positions": _build_plot_positions(),
 		"hover": Vector2i(hover_col, hover_row),
-		"context_menu_open": ctx_menu_open,
-		"context_tile": Vector2i(ctx_col, ctx_row),
 		"selected_seed": selected_seed,
 		"selected_fertilizer": selected_fertilizer,
 		"tool_mode": tool_mode,
@@ -1438,40 +1348,6 @@ func _draw_modal_ui(caller: CanvasItem):
 	_draw_seed_bar_overlay(vp)
 
 	_ui_draw_target = null
-
-func _draw_context_menu_overlay(vp: Vector2):
-	if not ctx_menu_open: return
-
-	var wp := _get_plot_position(ctx_col, ctx_row)
-	var vp_pos = (wp - cam.position) * cam.zoom + vp * 0.5
-	var menu_w = ctx_menu_items.size() * 50 + 10
-	var menu_rect = _ctx_menu_rect(vp_pos)
-
-	# 轻量工具条背景，避免少量按钮时形成突兀的黑色圆盘。
-	_d_rect(Rect2(menu_rect.position.x + 4, menu_rect.position.y + 9, menu_w - 8, 42), Color(0.04, 0.035, 0.025, 0.38))
-
-	# 画小箭头朝上指向地块（菜单在作物下方）
-	var arrow_pts: PackedVector2Array = PackedVector2Array([
-		Vector2(vp_pos.x - 8, menu_rect.position.y),
-		Vector2(vp_pos.x, menu_rect.position.y - 8),
-		Vector2(vp_pos.x + 8, menu_rect.position.y),
-	])
-	_d_colored_polygon(arrow_pts, Color(0.04, 0.035, 0.025, 0.38))
-	
-	for i in range(ctx_menu_items.size()):
-		var item = ctx_menu_items[i]
-		var ix = menu_rect.position.x + 5 + i * 50
-		var iy = menu_rect.position.y + 5
-		var button_rect := Rect2(ix + 4, iy + 4, 42, 42)
-		_d_rect(button_rect, Color(0.94, 0.88, 0.68, 0.82))
-		_d_rect(button_rect, Color(0.34, 0.24, 0.10, 0.45), false, 1.0)
-		
-		if item["icon"] != null:
-			var isz = item["icon"].get_size()
-			var iscale = minf(36.0 / maxf(isz.x, 1.0), 36.0 / maxf(isz.y, 1.0))
-			var idraw_sz = isz * iscale
-			var idraw_pos = Vector2(ix + 25 - idraw_sz.x * 0.5, iy + 25 - idraw_sz.y * 0.5)
-			_d_texture_rect(item["icon"], Rect2(idraw_pos, idraw_sz), false)
 
 func _draw_seed_bar_overlay(_vp: Vector2) -> void:
 	if not warehouse_open:

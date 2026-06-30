@@ -157,3 +157,6 @@
 [CodeGraph daemon] Listening on /home/user/project/godot-game-demo/.codegraph/daemon.sock (pid 606114, v1.0.1). Idle timeout 300000ms.
 [CodeGraph MCP] File watcher active — graph will auto-sync on changes
 [CodeGraph daemon] Shutting down (inactivity backstop; clients=1).
+[CodeGraph daemon] Listening on /home/user/project/godot-game-demo/.codegraph/daemon.sock (pid 849610, v1.0.1). Idle timeout 300000ms.
+[CodeGraph MCP] File watcher active — graph will auto-sync on changes
+[CodeGraph daemon] Shutting down (inactivity backstop; clients=1).
