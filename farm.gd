@@ -161,6 +161,9 @@ const DEFAULT_FERTILIZERS: Array = [
 	["丰收肥", 60, "yield_bonus", 0.10, [2], 1, 0],
 ]
 
+const ShopOverlayScene := preload("res://scenes/shop_overlay.tscn")
+const InventoryOverlayScene := preload("res://scenes/inventory_overlay.tscn")
+
 func _ready():
 	# 加载中文字体
 	var font_path := "res://assets/fonts/simhei.ttf"
@@ -359,6 +362,9 @@ func _fit_camera_to_screen():
 		_cam_min_zoom = camera_controller.min_zoom
 
 func _init_overlays():
+	_ensure_overlay_scene(ShopOverlayScene, "ShopOverlay")
+	_ensure_overlay_scene(InventoryOverlayScene, "InventoryOverlay")
+
 	# ---- ShopOverlay ----
 	var shop := get_node_or_null("UILayer/ShopOverlay")
 	if shop == null:
@@ -440,6 +446,15 @@ func _init_overlays():
 			settings_open = false
 			queue_redraw()
 		)
+
+func _ensure_overlay_scene(scene: PackedScene, node_name: String) -> void:
+	var ui_layer := get_node_or_null("UILayer")
+	if ui_layer == null or ui_layer.get_node_or_null(node_name) != null:
+		return
+	var overlay := scene.instantiate()
+	overlay.name = node_name
+	overlay.visible = false
+	ui_layer.add_child(overlay)
 
 func _sync_shop_data(shop):
 	shop.inventory = inventory

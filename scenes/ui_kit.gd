@@ -125,4 +125,3 @@ static func build_modal(parent: Control, panel_min: Vector2, title: String, titl
 	header.add_child(close_btn)
 
 	return [dim, vbox]
-

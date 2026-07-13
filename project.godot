@@ -18,6 +18,7 @@ config/icon="res://icon.svg"
 [autoload]
 
 ApiConfig="*res://api_config.gd"
+MCPRuntimeProbe="*res://addons/godot_mcp/runtime/mcp_runtime_probe.gd"
 
 [display]
 
