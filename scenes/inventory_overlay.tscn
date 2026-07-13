@@ -10,7 +10,13 @@ visible = true
 script = ExtResource("2_inv")
 title_texture = ExtResource("3_title")
 
-[node name="InventoryContent" parent="Center/Root/Content" instance=ExtResource("4_content")]
+[node name="TabBar" parent="Center/Root/Content"]
+visible = false
+
+[node name="TabContent" parent="Center/Root/Content"]
+offset_top = 0.0
+
+[node name="InventoryContent" parent="Center/Root/Content/TabContent" instance=ExtResource("4_content")]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0

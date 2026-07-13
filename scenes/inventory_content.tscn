@@ -11,8 +11,11 @@ mouse_filter = 1
 
 [node name="SellAllButton" type="Button" parent="."]
 layout_mode = 1
-offset_left = 606.0
-offset_right = 732.0
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -146.0
+offset_right = -20.0
 offset_bottom = 44.0
 theme_override_colors/font_color = Color(1, 0.96, 0.86, 1)
 theme_override_font_sizes/font_size = 18
@@ -20,9 +23,10 @@ text = "全部卖出"
 
 [node name="ItemsScroll" type="ScrollContainer" parent="."]
 layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
 offset_top = 56.0
-offset_right = 752.0
-offset_bottom = 356.0
 horizontal_scroll_mode = 0
 
 [node name="ItemsGrid" type="GridContainer" parent="ItemsScroll"]
@@ -34,9 +38,11 @@ columns = 5
 
 [node name="EmptyLabel" type="Label" parent="."]
 layout_mode = 1
-offset_left = 106.0
+anchors_preset = 10
+anchor_right = 1.0
+offset_left = 80.0
 offset_top = 166.0
-offset_right = 646.0
+offset_right = -80.0
 offset_bottom = 216.0
 theme_override_colors/font_color = Color(0.36, 0.22, 0.08, 1)
 theme_override_font_sizes/font_size = 22

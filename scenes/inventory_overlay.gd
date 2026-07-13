@@ -17,9 +17,9 @@ var inventory: Dictionary = {}:
 signal sell_requested(crop_id: int, amount: int)
 signal sell_all_requested
 
-@onready var sell_all_button: Button = $Center/Root/Content/InventoryContent/SellAllButton
-@onready var grid: GridContainer = $Center/Root/Content/InventoryContent/ItemsScroll/ItemsGrid
-@onready var empty_label: Label = $Center/Root/Content/InventoryContent/EmptyLabel
+@onready var sell_all_button: Button = $Center/Root/Content/TabContent/InventoryContent/SellAllButton
+@onready var grid: GridContainer = $Center/Root/Content/TabContent/InventoryContent/ItemsScroll/ItemsGrid
+@onready var empty_label: Label = $Center/Root/Content/TabContent/InventoryContent/EmptyLabel
 
 func _ready() -> void:
 	super._ready()

@@ -27,12 +27,12 @@ signal seed_buy_requested(crop_id: int)
 
 const FERT_DESC := ["生长-8%", "生长-12%", "生长-18%", "2h不缺水", "2h不生虫", "2h不长草", "产量+10%"]
 
-@onready var seed_button: BaseButton = $Center/Root/Content/ShopContent/SeedButtonClip/SeedButton
-@onready var fert_button: BaseButton = $Center/Root/Content/ShopContent/FertButtonClip/FertButton
-@onready var seed_scroll: ScrollContainer = $Center/Root/Content/ShopContent/SeedScroll
-@onready var fert_scroll: ScrollContainer = $Center/Root/Content/ShopContent/FertScroll
-@onready var seed_table: GridContainer = $Center/Root/Content/ShopContent/SeedScroll/SeedTable
-@onready var fert_table: GridContainer = $Center/Root/Content/ShopContent/FertScroll/FertTable
+@onready var seed_button: BaseButton = $Center/Root/Content/TabBar/SeedTabClip/SeedTab
+@onready var fert_button: BaseButton = $Center/Root/Content/TabBar/FertTabClip/FertTab
+@onready var seed_scroll: ScrollContainer = $Center/Root/Content/TabContent/ShopContent/SeedScroll
+@onready var fert_scroll: ScrollContainer = $Center/Root/Content/TabContent/ShopContent/FertScroll
+@onready var seed_table: GridContainer = $Center/Root/Content/TabContent/ShopContent/SeedScroll/SeedTable
+@onready var fert_table: GridContainer = $Center/Root/Content/TabContent/ShopContent/FertScroll/FertTable
 
 var _current_tab := 0
 var _ready_done := false
