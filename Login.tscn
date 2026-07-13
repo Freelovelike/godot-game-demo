@@ -1,170 +1,170 @@
-[gd_scene load_steps=16 format=3 uid="uid://login"]
+[gd_scene format=3 uid="uid://login"]
 
-[ext_resource type="Script" path="res://login.gd" id="1_login"]
-[ext_resource type="Texture2D" path="res://assets/登录场景资源/背景_登录场景.png" id="0_bg"]
-[ext_resource type="Texture2D" path="res://assets/登录场景资源/标题_Logo.png" id="2_logo"]
-[ext_resource type="Texture2D" path="res://assets/登录场景资源/木板_登录背景.png" id="3_panel"]
-[ext_resource type="Texture2D" path="res://assets/登录场景资源/按钮_账号登录.png" id="5_btn_login"]
-[ext_resource type="Texture2D" path="res://assets/登录场景资源/按钮_游客登陆.png" id="6_btn_guest"]
-[ext_resource type="Texture2D" path="res://assets/登录场景资源/按钮_开始游戏.png" id="7_btn_start"]
-[ext_resource type="Texture2D" path="res://assets/登录场景资源/木板_健康公告.png" id="8_notice"]
-[ext_resource type="Texture2D" path="res://assets/登录场景资源/底栏_记住账号.png" id="9_remember"]
-[ext_resource type="Texture2D" path="res://assets/登录场景资源/底栏_切换服务器.png" id="10_server"]
-[ext_resource type="Texture2D" path="res://assets/登录场景资源/底栏_用户协议.png" id="11_agree"]
-[ext_resource type="Texture2D" path="res://assets/登录场景资源/图标_客服.png" id="12_cs"]
-[ext_resource type="Texture2D" path="res://assets/登录场景资源/图标_公告.png" id="13_notice_icon"]
+[ext_resource type="Texture2D" uid="uid://bcg1s6mt8nbo6" path="res://assets/登录场景资源/背景_登录场景.png" id="0_bg"]
+[ext_resource type="Script" uid="uid://37kmuwtdri5g" path="res://login.gd" id="1_login"]
+[ext_resource type="Texture2D" uid="uid://dm7lisg1tbhai" path="res://assets/登录场景资源/标题_Logo.png" id="2_logo"]
+[ext_resource type="Texture2D" uid="uid://bffg2bxae4yur" path="res://assets/登录场景资源/木板_登录背景.png" id="3_panel"]
+[ext_resource type="Texture2D" uid="uid://bh8fb17fs0vuj" path="res://assets/登录场景资源/按钮_账号登录.png" id="5_btn_login"]
+[ext_resource type="Texture2D" uid="uid://bjqaa34n8lsao" path="res://assets/登录场景资源/按钮_游客登陆.png" id="6_btn_guest"]
+[ext_resource type="Texture2D" uid="uid://crgbonsy06mst" path="res://assets/登录场景资源/按钮_开始游戏.png" id="7_btn_start"]
+[ext_resource type="Texture2D" uid="uid://b88xwwu7xui3" path="res://assets/登录场景资源/木板_健康公告.png" id="8_notice"]
+[ext_resource type="Texture2D" uid="uid://d2m2ui8kxew7n" path="res://assets/登录场景资源/底栏_用户协议.png" id="11_agree"]
+[ext_resource type="Texture2D" uid="uid://cm4axo5mlq4h8" path="res://assets/登录场景资源/图标_客服.png" id="12_cs"]
+[ext_resource type="Texture2D" uid="uid://bf6wyowipl2pn" path="res://assets/登录场景资源/图标_公告.png" id="13_notice_icon"]
 
-[node name="Login" type="Control"]
+[node name="Login" type="Control" unique_id=551540863]
+layout_mode = 3
+anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
 script = ExtResource("1_login")
 
-[node name="BgImage" type="TextureRect" parent="."]
+[node name="BgImage" type="TextureRect" parent="." unique_id=497853365]
+layout_mode = 1
+anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
 texture = ExtResource("0_bg")
 expand_mode = 1
 stretch_mode = 6
 
-[node name="Logo" type="TextureRect" parent="."]
-anchor_left = 0.5
-anchor_right = 0.5
-offset_left = -260.0
-offset_top = 30.0
-offset_right = 260.0
-offset_bottom = 138.0
-texture = ExtResource("2_logo")
-expand_mode = 1
-stretch_mode = 5
+[node name="DesignStage" type="Control" parent="." unique_id=1707145600]
+anchors_preset = 0
+offset_right = 1280.0
+offset_bottom = 720.0
+mouse_filter = 1
 
-[node name="LoginPanel" type="TextureRect" parent="."]
-anchor_left = 0.5
-anchor_right = 0.5
-offset_left = -310.0
-offset_top = 145.0
-offset_right = 310.0
-offset_bottom = 565.0
+[node name="LoginPanel" type="TextureRect" parent="DesignStage" unique_id=993541936]
+layout_mode = 0
+offset_left = 230.0
+offset_top = 198.0
+offset_right = 730.0
+offset_bottom = 563.0
 texture = ExtResource("3_panel")
 expand_mode = 1
 stretch_mode = 5
 
-[node name="UsernameInput" type="LineEdit" parent="LoginPanel"]
-offset_left = 100.0
-offset_top = 80.0
-offset_right = 510.0
-offset_bottom = 125.0
+[node name="UsernameInput" type="LineEdit" parent="DesignStage/LoginPanel" unique_id=892122098]
+layout_mode = 0
+offset_left = 96.0
+offset_top = 70.0
+offset_right = 416.0
+offset_bottom = 108.0
 placeholder_text = "账号"
 max_length = 32
 
-[node name="PasswordInput" type="LineEdit" parent="LoginPanel"]
-offset_left = 100.0
-offset_top = 145.0
-offset_right = 510.0
-offset_bottom = 190.0
+[node name="PasswordInput" type="LineEdit" parent="DesignStage/LoginPanel" unique_id=1072797761]
+layout_mode = 0
+offset_left = 96.0
+offset_top = 114.0
+offset_right = 416.0
+offset_bottom = 152.0
 placeholder_text = "密码"
+max_length = 64
 secret = true
 secret_character = "*"
-max_length = 64
 
-[node name="LoginBtn" type="TextureButton" parent="LoginPanel"]
-offset_left = 60.0
-offset_top = 218.0
-offset_right = 280.0
-offset_bottom = 254.0
+[node name="BtnStartGame" type="TextureButton" parent="DesignStage/LoginPanel" unique_id=133061598]
+layout_mode = 0
+offset_left = 130.0
+offset_top = 157.0
+offset_right = 387.0
+offset_bottom = 227.0
+texture_normal = ExtResource("7_btn_start")
+ignore_texture_size = true
+stretch_mode = 0
+
+[node name="LoginBtn" type="TextureButton" parent="DesignStage/LoginPanel" unique_id=1918909551]
+layout_mode = 0
+offset_left = 71.0
+offset_top = 235.0
+offset_right = 246.0
+offset_bottom = 295.0
 texture_normal = ExtResource("5_btn_login")
-stretch_mode = 2
+ignore_texture_size = true
+stretch_mode = 0
 
-[node name="GuestBtn" type="TextureButton" parent="LoginPanel"]
-offset_left = 300.0
-offset_top = 218.0
-offset_right = 545.0
-offset_bottom = 254.0
+[node name="GuestBtn" type="TextureButton" parent="DesignStage/LoginPanel" unique_id=1968950803]
+layout_mode = 0
+offset_left = 270.0
+offset_top = 235.0
+offset_right = 445.0
+offset_bottom = 295.0
 texture_normal = ExtResource("6_btn_guest")
-stretch_mode = 2
+ignore_texture_size = true
+stretch_mode = 0
 
-[node name="ModeToggle" type="Button" parent="LoginPanel"]
-offset_left = 160.0
-offset_top = 265.0
-offset_right = 450.0
-offset_bottom = 292.0
+[node name="ModeToggle" type="Button" parent="DesignStage/LoginPanel" unique_id=1386886514]
+layout_mode = 0
+offset_left = 113.0
+offset_top = 301.0
+offset_right = 403.0
+offset_bottom = 332.0
 text = "没有账号？点此注册"
 flat = true
 
-[node name="StatusLabel" type="Label" parent="LoginPanel"]
-anchor_left = 0.0
+[node name="StatusLabel" type="Label" parent="DesignStage/LoginPanel" unique_id=1268599505]
+layout_mode = 1
+anchors_preset = 10
 anchor_right = 1.0
-offset_top = 298.0
-offset_bottom = 322.0
+offset_top = 338.0
+offset_bottom = 362.0
+grow_horizontal = 2
 horizontal_alignment = 1
-text = ""
 
-[node name="BarRemember" type="TextureButton" parent="LoginPanel"]
-offset_left = 30.0
-offset_top = 335.0
-offset_right = 290.0
-offset_bottom = 373.0
-texture_normal = ExtResource("9_remember")
-stretch_mode = 2
+[node name="Logo" type="TextureRect" parent="DesignStage" unique_id=291949780]
+layout_mode = 0
+offset_left = 236.0
+offset_top = 56.0
+offset_right = 737.0
+offset_bottom = 231.0
+mouse_filter = 2
+texture = ExtResource("2_logo")
+expand_mode = 1
+stretch_mode = 5
 
-[node name="BarServer" type="TextureButton" parent="LoginPanel"]
-offset_left = 305.0
-offset_top = 335.0
-offset_right = 570.0
-offset_bottom = 373.0
-texture_normal = ExtResource("10_server")
-stretch_mode = 2
-
-[node name="HealthNotice" type="TextureRect" parent="."]
-anchor_left = 1.0
-anchor_right = 1.0
-anchor_top = 0.5
-anchor_bottom = 0.5
-offset_left = -230.0
-offset_top = -155.0
-offset_right = -20.0
-offset_bottom = 155.0
+[node name="HealthNotice" type="TextureRect" parent="DesignStage" unique_id=1595906172]
+layout_mode = 0
+offset_left = 1010.0
+offset_top = 520.0
+offset_right = 1235.0
+offset_bottom = 694.0
+mouse_filter = 2
 texture = ExtResource("8_notice")
 expand_mode = 1
 stretch_mode = 5
 
-[node name="NoticeIcon" type="TextureButton" parent="."]
-anchor_left = 1.0
-anchor_right = 1.0
-offset_left = -145.0
-offset_top = 10.0
-offset_right = -75.0
-offset_bottom = 80.0
+[node name="NoticeIcon" type="TextureButton" parent="DesignStage" unique_id=214111551]
+layout_mode = 0
+offset_left = 1183.0
+offset_top = 30.0
+offset_right = 1255.0
+offset_bottom = 103.0
 texture_normal = ExtResource("13_notice_icon")
-stretch_mode = 2
+ignore_texture_size = true
+stretch_mode = 0
 
-[node name="IconCS" type="TextureButton" parent="."]
-anchor_left = 1.0
-anchor_right = 1.0
-offset_left = -75.0
-offset_top = 10.0
-offset_right = -5.0
-offset_bottom = 80.0
+[node name="IconCS" type="TextureButton" parent="DesignStage" unique_id=750248694]
+layout_mode = 0
+offset_left = 1183.0
+offset_top = 114.0
+offset_right = 1255.0
+offset_bottom = 187.0
 texture_normal = ExtResource("12_cs")
-stretch_mode = 2
+ignore_texture_size = true
+stretch_mode = 0
 
-[node name="BtnStartGame" type="TextureButton" parent="."]
-anchor_top = 1.0
-anchor_bottom = 1.0
-offset_left = 30.0
-offset_top = -100.0
-offset_right = 290.0
-offset_bottom = -20.0
-texture_normal = ExtResource("7_btn_start")
-stretch_mode = 2
-
-[node name="BarAgreement" type="TextureButton" parent="."]
-anchor_left = 0.5
-anchor_right = 0.5
-anchor_top = 1.0
-anchor_bottom = 1.0
-offset_left = -420.0
-offset_top = -50.0
-offset_right = 420.0
-offset_bottom = -10.0
+[node name="BarAgreement" type="TextureButton" parent="DesignStage" unique_id=1304252318]
+layout_mode = 0
+offset_left = 415.0
+offset_top = 674.0
+offset_right = 865.0
+offset_bottom = 711.0
 texture_normal = ExtResource("11_agree")
-stretch_mode = 2
+ignore_texture_size = true
+stretch_mode = 0

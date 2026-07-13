@@ -3,8 +3,10 @@ extends Control
 ## Login / Register scene — talks to the Go backend and transitions to Farm on success.
 
 const AUTH_FILE := "user://auth.json"
+const LOGIN_DESIGN_SIZE := Vector2(1280.0, 720.0)
 
 var http: HTTPRequest
+var design_stage: Control
 var username_input: LineEdit
 var password_input: LineEdit
 var status_label: Label
@@ -16,12 +18,22 @@ var pending_action := ""
 
 func _ready() -> void:
 	_load_cn_font()
+	design_stage = get_node_or_null("DesignStage") as Control
+	resized.connect(_layout_login_scene)
+	_layout_login_scene()
 
-	username_input = $LoginPanel/UsernameInput
-	password_input = $LoginPanel/PasswordInput
-	status_label   = $LoginPanel/StatusLabel
-	action_button  = $LoginPanel/LoginBtn
-	mode_toggle    = $LoginPanel/ModeToggle
+	var login_panel := get_node_or_null("DesignStage/LoginPanel")
+	if login_panel == null:
+		login_panel = get_node_or_null("LoginPanel")
+	if login_panel == null:
+		push_error("LoginPanel node is missing from Login.tscn")
+		return
+
+	username_input = login_panel.get_node_or_null("UsernameInput") as LineEdit
+	password_input = login_panel.get_node_or_null("PasswordInput") as LineEdit
+	status_label   = login_panel.get_node_or_null("StatusLabel") as Label
+	action_button  = login_panel.get_node_or_null("LoginBtn") as TextureButton
+	mode_toggle    = login_panel.get_node_or_null("ModeToggle") as Button
 
 	_apply_cn_font(username_input)
 	_apply_cn_font(password_input)
@@ -42,6 +54,13 @@ func _ready() -> void:
 		http.timeout = 120.0
 		http.request_completed.connect(_on_request_completed)
 		add_child(http)
+
+func _layout_login_scene() -> void:
+	if design_stage == null:
+		return
+	var stage_scale := minf(size.x / LOGIN_DESIGN_SIZE.x, size.y / LOGIN_DESIGN_SIZE.y)
+	design_stage.scale = Vector2.ONE * stage_scale
+	design_stage.position = (size - LOGIN_DESIGN_SIZE * stage_scale) * 0.5
 
 func _try_auto_login() -> bool:
 	if not FileAccess.file_exists(AUTH_FILE):
@@ -75,7 +94,7 @@ func _load_cn_font() -> void:
 		_cn_font = load(font_path) as Font
 
 func _apply_cn_font(control: Control) -> void:
-	if _cn_font != null:
+	if control != null and _cn_font != null:
 		control.add_theme_font_override("font", _cn_font)
 
 func _on_validate_completed(result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray, token: String, user_info: Dictionary) -> void:
