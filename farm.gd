@@ -879,7 +879,8 @@ func _input(event: InputEvent):
 		queue_redraw()
 		return
 
-	if camera_controller != null and camera_controller.handle_input(event):
+	var overlay_blocks_camera := shop_open or inventory_open or settings_open
+	if not overlay_blocks_camera and camera_controller != null and camera_controller.handle_input(event):
 		queue_redraw()
 		return
 

@@ -29,6 +29,7 @@ func _ready() -> void:
 	title.texture = title_texture
 	resized.connect(_layout_popup)
 	_layout_popup()
+	call_deferred("_style_scrollbars")
 
 func _layout_popup() -> void:
 	if not is_instance_valid(popup_root):
@@ -41,6 +42,30 @@ func _layout_popup() -> void:
 	popup_scale = clampf(popup_scale, MIN_POPUP_SCALE, MAX_POPUP_SCALE)
 	popup_root.scale = Vector2.ONE * popup_scale
 	popup_root.position = (size - POPUP_DESIGN_SIZE * popup_scale) * 0.5
+
+func _style_scrollbars() -> void:
+	for node in find_children("*", "ScrollContainer", true, false):
+		var scroll := node as ScrollContainer
+		if scroll == null:
+			continue
+		var bar := scroll.get_v_scroll_bar()
+		bar.custom_minimum_size.x = 8.0
+		bar.add_theme_stylebox_override("scroll", _scrollbar_style(Color(0.20, 0.11, 0.035, 0.22), 4.0))
+		bar.add_theme_stylebox_override("scroll_focus", _scrollbar_style(Color(0.20, 0.11, 0.035, 0.28), 4.0))
+		bar.add_theme_stylebox_override("grabber", _scrollbar_style(Color(0.48, 0.27, 0.08, 0.72), 4.0))
+		bar.add_theme_stylebox_override("grabber_highlight", _scrollbar_style(Color(0.58, 0.34, 0.10, 0.88), 4.0))
+		bar.add_theme_stylebox_override("grabber_pressed", _scrollbar_style(Color(0.38, 0.20, 0.055, 0.95), 4.0))
+
+func _scrollbar_style(color: Color, radius: float) -> StyleBoxFlat:
+	var style := StyleBoxFlat.new()
+	style.bg_color = color
+	style.corner_radius_top_left = int(radius)
+	style.corner_radius_top_right = int(radius)
+	style.corner_radius_bottom_left = int(radius)
+	style.corner_radius_bottom_right = int(radius)
+	style.content_margin_left = 2.0
+	style.content_margin_right = 2.0
+	return style
 
 func _on_shade_input(event: InputEvent) -> void:
 	var mouse_button := event as InputEventMouseButton
