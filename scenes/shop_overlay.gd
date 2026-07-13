@@ -28,9 +28,13 @@ signal seed_buy_requested(crop_id: int)
 const FERT_DESC := ["生长-8%", "生长-12%", "生长-18%", "2h不缺水", "2h不生虫", "2h不长草", "产量+10%"]
 const SEED_COLUMN_RATIOS := [1.55, 1.0, 1.5, 1.0, 1.0, 1.0]
 const FERT_COLUMN_RATIOS := [1.5, 0.8, 1.2, 1.1, 1.25]
+const TAB_BUTTON_GAP := 14.0
 
-@onready var seed_button: BaseButton = $Center/Root/Content/TabBar/SeedTabClip/SeedTab
-@onready var fert_button: BaseButton = $Center/Root/Content/TabBar/FertTabClip/FertTab
+@onready var tab_bar: Control = $Center/Root/Content/TabBar
+@onready var seed_clip: Control = $Center/Root/Content/TabBar/SeedTabClip
+@onready var fert_clip: Control = $Center/Root/Content/TabBar/FertTabClip
+@onready var seed_button: TextureButton = $Center/Root/Content/TabBar/SeedTabClip/SeedTab
+@onready var fert_button: TextureButton = $Center/Root/Content/TabBar/FertTabClip/FertTab
 @onready var seed_scroll: ScrollContainer = $Center/Root/Content/TabContent/ShopContent/SeedScroll
 @onready var fert_scroll: ScrollContainer = $Center/Root/Content/TabContent/ShopContent/FertScroll
 @onready var seed_table: GridContainer = $Center/Root/Content/TabContent/ShopContent/SeedScroll/SeedTable
@@ -45,10 +49,12 @@ func _ready() -> void:
 
 	seed_button.pressed.connect(func(): _set_tab(0))
 	fert_button.pressed.connect(func(): _set_tab(1))
+	tab_bar.resized.connect(_layout_tab_buttons)
 	seed_scroll.resized.connect(_sync_table_widths)
 	fert_scroll.resized.connect(_sync_table_widths)
 
 	_refresh()
+	call_deferred("_layout_tab_buttons")
 	call_deferred("_sync_table_widths")
 
 func _set_tab(index: int) -> void:
@@ -74,6 +80,27 @@ func _sync_table_width(scroll: ScrollContainer, table: GridContainer) -> void:
 	var scrollbar_width := scrollbar.size.x if scrollbar.visible else 0.0
 	table.custom_minimum_size.x = maxf(scroll.size.x - scrollbar_width, 1.0)
 	table.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+
+func _layout_tab_buttons() -> void:
+	if tab_bar == null or seed_clip == null or fert_clip == null:
+		return
+	var tab_height := tab_bar.size.y
+	if tab_height <= 0.0:
+		return
+	var seed_width := _scaled_tab_width(seed_button, tab_height)
+	var fert_width := _scaled_tab_width(fert_button, tab_height)
+	var total_width := seed_width + TAB_BUTTON_GAP + fert_width
+	var start_x := maxf((tab_bar.size.x - total_width) * 0.5, 0.0)
+	seed_clip.offset_left = start_x
+	seed_clip.offset_right = start_x + seed_width
+	fert_clip.offset_left = seed_clip.offset_right + TAB_BUTTON_GAP
+	fert_clip.offset_right = fert_clip.offset_left + fert_width
+
+func _scaled_tab_width(button: TextureButton, target_height: float) -> float:
+	var texture := button.texture_normal
+	if texture == null or texture.get_height() <= 0:
+		return target_height
+	return target_height * float(texture.get_width()) / float(texture.get_height())
 
 func _refresh() -> void:
 	if not _ready_done:

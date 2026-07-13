@@ -20,36 +20,44 @@ texture = ExtResource("3_title")
 clip_contents = true
 layout_mode = 1
 anchors_preset = 0
+anchor_bottom = 1.0
 offset_left = 26.0
 offset_right = 178.0
-offset_bottom = 50.0
+grow_vertical = 2
 
 [node name="SeedTab" type="TextureButton" parent="Center/Root/Content/TabBar/SeedTabClip" index="0" unique_id=1148489112]
 layout_mode = 1
-offset_right = 152.0
-offset_bottom = 62.0
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
 disabled = true
 texture_normal = ExtResource("5_seed")
 texture_disabled = ExtResource("7_seed_active")
 ignore_texture_size = true
-stretch_mode = 0
+stretch_mode = 5
 
 [node name="FertTabClip" type="Control" parent="Center/Root/Content/TabBar" parent_id_path=PackedInt32Array(1590799137) index="1" unique_id=1406551159]
 clip_contents = true
 layout_mode = 1
 anchors_preset = 0
+anchor_bottom = 1.0
 offset_left = 177.0
 offset_right = 329.0
-offset_bottom = 50.0
+grow_vertical = 2
 
 [node name="FertTab" type="TextureButton" parent="Center/Root/Content/TabBar/FertTabClip" index="0" unique_id=1222113782]
 layout_mode = 1
-offset_right = 152.0
-offset_bottom = 62.0
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
 texture_normal = ExtResource("6_fert")
 texture_disabled = ExtResource("8_fert_active")
 ignore_texture_size = true
-stretch_mode = 0
+stretch_mode = 5
 
 [node name="ShopContent" parent="Center/Root/Content/TabContent" parent_id_path=PackedInt32Array(1693685820) index="0" unique_id=293070059 instance=ExtResource("4_content")]
 layout_mode = 1
