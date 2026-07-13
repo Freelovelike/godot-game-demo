@@ -11,13 +11,14 @@ config_version=5
 [application]
 
 config/name="新建游戏项目"
-run/main_scene="res://Login.tscn"
+run/main_scene="res://Loading.tscn"
 config/features=PackedStringArray("4.6", "Forward Plus")
 config/icon="res://icon.svg"
 
 [autoload]
 
 ApiConfig="*res://api_config.gd"
+GameResources="*res://game_resources.gd"
 
 [display]
 

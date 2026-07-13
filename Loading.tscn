@@ -1,0 +1,123 @@
+[gd_scene load_steps=9 format=3]
+
+[ext_resource type="Script" path="res://loading.gd" id="1_script"]
+[ext_resource type="Texture2D" path="res://assets/加载场景资源/ChatGPT Image 2026年7月13日 13_52_54 (4).png" id="2_bg"]
+[ext_resource type="Texture2D" path="res://assets/加载场景资源/ChatGPT Image 2026年7月13日 13_52_53 (1)_1.png" id="3_logo"]
+[ext_resource type="Texture2D" path="res://assets/加载场景资源/ChatGPT Image 2026年7月13日 13_52_53 (1)_2.png" id="4_welcome"]
+[ext_resource type="Texture2D" path="res://assets/加载场景资源/ChatGPT Image 2026年7月13日 13_52_53 (1)_3.png" id="5_frame"]
+[ext_resource type="Texture2D" path="res://assets/加载场景资源/ChatGPT Image 2026年7月13日 13_52_53 (1)_4.png" id="6_fill"]
+[ext_resource type="Texture2D" path="res://assets/加载场景资源/ChatGPT Image 2026年7月13日 13_52_53 (1)_6.png" id="7_status"]
+[ext_resource type="Texture2D" path="res://assets/加载场景资源/ChatGPT Image 2026年7月13日 13_52_53 (1)_7.png" id="8_tip"]
+
+[node name="Loading" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_script")
+
+[node name="Background" type="TextureRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+texture = ExtResource("2_bg")
+expand_mode = 1
+stretch_mode = 6
+
+[node name="DesignStage" type="Control" parent="."]
+layout_mode = 0
+offset_right = 1280.0
+offset_bottom = 720.0
+mouse_filter = 2
+
+[node name="Logo" type="TextureRect" parent="DesignStage"]
+layout_mode = 0
+offset_left = 145.0
+offset_top = 42.0
+offset_right = 750.0
+offset_bottom = 300.0
+mouse_filter = 2
+texture = ExtResource("3_logo")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="WelcomeSign" type="TextureRect" parent="DesignStage"]
+layout_mode = 0
+offset_left = 74.0
+offset_top = 525.0
+offset_right = 324.0
+offset_bottom = 664.0
+mouse_filter = 2
+texture = ExtResource("4_welcome")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="LoadingPanel" type="Control" parent="DesignStage"]
+layout_mode = 0
+offset_left = 300.0
+offset_top = 565.0
+offset_right = 1020.0
+offset_bottom = 715.0
+mouse_filter = 2
+
+[node name="Frame" type="TextureRect" parent="DesignStage/LoadingPanel"]
+layout_mode = 0
+offset_right = 720.0
+offset_bottom = 119.0
+mouse_filter = 2
+texture = ExtResource("5_frame")
+expand_mode = 1
+stretch_mode = 0
+
+[node name="Status" type="TextureRect" parent="DesignStage/LoadingPanel"]
+layout_mode = 0
+offset_left = 155.0
+offset_top = 7.0
+offset_right = 565.0
+offset_bottom = 60.0
+mouse_filter = 2
+texture = ExtResource("7_status")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="ProgressBar" type="TextureProgressBar" parent="DesignStage/LoadingPanel"]
+layout_mode = 0
+offset_left = 74.0
+offset_top = 54.0
+offset_right = 552.0
+offset_bottom = 88.0
+mouse_filter = 2
+value = 0.0
+texture_progress = ExtResource("6_fill")
+
+[node name="PercentLabel" type="Label" parent="DesignStage/LoadingPanel"]
+layout_mode = 0
+offset_left = 573.0
+offset_top = 48.0
+offset_right = 680.0
+offset_bottom = 92.0
+theme_override_colors/font_color = Color(1, 0.953, 0.78, 1)
+theme_override_colors/font_outline_color = Color(0.29, 0.12, 0.035, 1)
+theme_override_constants/outline_size = 6
+theme_override_font_sizes/font_size = 28
+text = "0%"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="Tip" type="TextureRect" parent="DesignStage/LoadingPanel"]
+layout_mode = 0
+offset_left = 105.0
+offset_top = 96.0
+offset_right = 615.0
+offset_bottom = 160.0
+mouse_filter = 2
+texture = ExtResource("8_tip")
+expand_mode = 1
+stretch_mode = 5
+
