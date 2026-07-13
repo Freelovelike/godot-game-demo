@@ -110,7 +110,7 @@ layout_mode = 1
 anchors_preset = 0
 offset_left = 10.0
 offset_right = 530.506
-offset_bottom = 38.0
+offset_bottom = 35.059525
 mouse_filter = 1
 
 [node name="TabContent" type="Control" parent="Center/Root/Content" unique_id=1693685820]

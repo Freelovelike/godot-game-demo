@@ -45,8 +45,11 @@ func _ready() -> void:
 
 	seed_button.pressed.connect(func(): _set_tab(0))
 	fert_button.pressed.connect(func(): _set_tab(1))
+	seed_scroll.resized.connect(_sync_table_widths)
+	fert_scroll.resized.connect(_sync_table_widths)
 
 	_refresh()
+	call_deferred("_sync_table_widths")
 
 func _set_tab(index: int) -> void:
 	_current_tab = index
@@ -58,6 +61,19 @@ func _set_tab(index: int) -> void:
 		seed_button.disabled = index == 0
 	if fert_button:
 		fert_button.disabled = index == 1
+	call_deferred("_sync_table_widths")
+
+func _sync_table_widths() -> void:
+	_sync_table_width(seed_scroll, seed_table)
+	_sync_table_width(fert_scroll, fert_table)
+
+func _sync_table_width(scroll: ScrollContainer, table: GridContainer) -> void:
+	if scroll == null or table == null:
+		return
+	var scrollbar := scroll.get_v_scroll_bar()
+	var scrollbar_width := scrollbar.size.x if scrollbar.visible else 0.0
+	table.custom_minimum_size.x = maxf(scroll.size.x - scrollbar_width, 1.0)
+	table.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 
 func _refresh() -> void:
 	if not _ready_done:
