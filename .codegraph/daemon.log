@@ -208,3 +208,9 @@
 [CodeGraph] File watcher error {
   error: "Error: EBUSY: resource busy or locked, watch 'C:\\Users\\sisui\\Desktop\\godot\\godot-game-demo\\Farm.tscn1985248594.tmp'"
 }
+[CodeGraph] File watcher error {
+  error: "Error: EBUSY: resource busy or locked, watch 'C:\\Users\\sisui\\Desktop\\godot\\godot-game-demo\\scenes\\popup_base.tscn3008882353.tmp'"
+}
+[CodeGraph] File watcher error {
+  error: "Error: EBUSY: resource busy or locked, watch 'C:\\Users\\sisui\\Desktop\\godot\\godot-game-demo\\scenes\\popup_base.tscn3051311595.tmp'"
+}

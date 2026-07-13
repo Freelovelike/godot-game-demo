@@ -26,6 +26,8 @@ signal fertilizer_buy_requested(fert_id: int)
 signal seed_buy_requested(crop_id: int)
 
 const FERT_DESC := ["生长-8%", "生长-12%", "生长-18%", "2h不缺水", "2h不生虫", "2h不长草", "产量+10%"]
+const SEED_COLUMN_RATIOS := [1.55, 1.0, 1.5, 1.0, 1.0, 1.0]
+const FERT_COLUMN_RATIOS := [1.5, 0.8, 1.2, 1.1, 1.25]
 
 @onready var seed_button: BaseButton = $Center/Root/Content/TabBar/SeedTabClip/SeedTab
 @onready var fert_button: BaseButton = $Center/Root/Content/TabBar/FertTabClip/FertTab
@@ -69,42 +71,46 @@ func _build_seed_table() -> void:
 		return
 	_clear_children(seed_table)
 	seed_table.columns = 6
-	for h in ["名称", "种子价", "产量 x 单价", "生长", "利润", "购买"]:
-		var min_size := Vector2(96, 36)
-		if h == "名称":
-			min_size.x = 138
-		elif h == "产量 x 单价":
-			min_size.x = 140
-		seed_table.add_child(_make_label(h, 22, Color(0.25, 0.14, 0.04), HORIZONTAL_ALIGNMENT_CENTER, min_size))
+	seed_table.add_theme_constant_override("h_separation", 4)
+	var headers := ["名称", "种子价", "产量 x 单价", "生长", "利润", "购买"]
+	for column in range(headers.size()):
+		_add_grid_cell(seed_table, _make_label(headers[column], 22, Color(0.25, 0.14, 0.04), HORIZONTAL_ALIGNMENT_CENTER, Vector2(0, 36)), SEED_COLUMN_RATIOS[column])
 	for i in range(CROPS.size()):
-		seed_table.add_child(_make_crop_name_cell(i))
-		seed_table.add_child(_make_label(str(_crop_seed_cost(i)) + "金", 22, Color(0.78, 0.30, 0.03), HORIZONTAL_ALIGNMENT_CENTER, Vector2(96, 42)))
-		seed_table.add_child(_make_label(str(_crop_base_yield(i)) + "x" + str(_crop_unit_sell(i)), 22, Color(0.04, 0.52, 0.08), HORIZONTAL_ALIGNMENT_CENTER, Vector2(140, 42)))
-		seed_table.add_child(_make_label(str(int(_crop_grow_time(i))) + "秒", 22, Color(0.04, 0.28, 0.86), HORIZONTAL_ALIGNMENT_CENTER, Vector2(92, 42)))
+		_add_grid_cell(seed_table, _make_crop_name_cell(i), SEED_COLUMN_RATIOS[0])
+		_add_grid_cell(seed_table, _make_label(str(_crop_seed_cost(i)) + "金", 22, Color(0.78, 0.30, 0.03), HORIZONTAL_ALIGNMENT_CENTER, Vector2(0, 42)), SEED_COLUMN_RATIOS[1])
+		_add_grid_cell(seed_table, _make_label(str(_crop_base_yield(i)) + "x" + str(_crop_unit_sell(i)), 22, Color(0.04, 0.52, 0.08), HORIZONTAL_ALIGNMENT_CENTER, Vector2(0, 42)), SEED_COLUMN_RATIOS[2])
+		_add_grid_cell(seed_table, _make_label(str(int(_crop_grow_time(i))) + "秒", 22, Color(0.04, 0.28, 0.86), HORIZONTAL_ALIGNMENT_CENTER, Vector2(0, 42)), SEED_COLUMN_RATIOS[3])
 		var profit := _crop_base_yield(i) * _crop_unit_sell(i) - _crop_seed_cost(i)
-		seed_table.add_child(_make_label("+" + str(profit), 22, Color(0.05, 0.52, 0.06), HORIZONTAL_ALIGNMENT_CENTER, Vector2(92, 42)))
-		seed_table.add_child(_make_seed_buy_button(i))
+		_add_grid_cell(seed_table, _make_label("+" + str(profit), 22, Color(0.05, 0.52, 0.06), HORIZONTAL_ALIGNMENT_CENTER, Vector2(0, 42)), SEED_COLUMN_RATIOS[4])
+		_add_grid_cell(seed_table, _make_seed_buy_button(i), SEED_COLUMN_RATIOS[5])
 
 func _build_fert_table() -> void:
 	if fert_table == null:
 		return
 	_clear_children(fert_table)
 	fert_table.columns = 5
-	for h in ["名称", "价格", "效果", "状态", "操作"]:
-		fert_table.add_child(_make_label(h, 22, Color(0.25, 0.14, 0.04), HORIZONTAL_ALIGNMENT_CENTER, Vector2(120, 36)))
+	fert_table.add_theme_constant_override("h_separation", 4)
+	var headers := ["名称", "价格", "效果", "状态", "操作"]
+	for column in range(headers.size()):
+		_add_grid_cell(fert_table, _make_label(headers[column], 22, Color(0.25, 0.14, 0.04), HORIZONTAL_ALIGNMENT_CENTER, Vector2(0, 36)), FERT_COLUMN_RATIOS[column])
 	for i in range(FERTILIZERS.size()):
-		fert_table.add_child(_make_label(_fertilizer_name(i), 20, Color(0.12, 0.07, 0.02), HORIZONTAL_ALIGNMENT_LEFT, Vector2(180, 42)))
-		fert_table.add_child(_make_label(str(_fertilizer_cost(i)) + "金", 20, Color(0.78, 0.30, 0.03), HORIZONTAL_ALIGNMENT_CENTER, Vector2(92, 42)))
-		fert_table.add_child(_make_label(FERT_DESC[i] if i < FERT_DESC.size() else "", 19, Color(0.05, 0.42, 0.08), HORIZONTAL_ALIGNMENT_CENTER, Vector2(130, 42)))
+		_add_grid_cell(fert_table, _make_label(_fertilizer_name(i), 20, Color(0.12, 0.07, 0.02), HORIZONTAL_ALIGNMENT_LEFT, Vector2(0, 42)), FERT_COLUMN_RATIOS[0])
+		_add_grid_cell(fert_table, _make_label(str(_fertilizer_cost(i)) + "金", 20, Color(0.78, 0.30, 0.03), HORIZONTAL_ALIGNMENT_CENTER, Vector2(0, 42)), FERT_COLUMN_RATIOS[1])
+		_add_grid_cell(fert_table, _make_label(FERT_DESC[i] if i < FERT_DESC.size() else "", 19, Color(0.05, 0.42, 0.08), HORIZONTAL_ALIGNMENT_CENTER, Vector2(0, 42)), FERT_COLUMN_RATIOS[2])
 		var status := "已有 " + str(int(fertilizer_inventory.get(i, 0)))
 		if selected_fertilizer == i:
 			status += " 已选"
-		fert_table.add_child(_make_label(status, 18, Color(0.26, 0.19, 0.08), HORIZONTAL_ALIGNMENT_CENTER, Vector2(120, 42)))
-		fert_table.add_child(_make_fert_actions(i))
+		_add_grid_cell(fert_table, _make_label(status, 18, Color(0.26, 0.19, 0.08), HORIZONTAL_ALIGNMENT_CENTER, Vector2(0, 42)), FERT_COLUMN_RATIOS[3])
+		_add_grid_cell(fert_table, _make_fert_actions(i), FERT_COLUMN_RATIOS[4])
+
+func _add_grid_cell(grid: GridContainer, control: Control, stretch_ratio: float) -> void:
+	control.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	control.size_flags_stretch_ratio = stretch_ratio
+	grid.add_child(control)
 
 func _make_crop_name_cell(crop_id: int) -> HBoxContainer:
 	var box := HBoxContainer.new()
-	box.custom_minimum_size = Vector2(138, 42)
+	box.custom_minimum_size = Vector2(0, 42)
 	box.add_theme_constant_override("separation", 6)
 
 	var tex := CropAtlas.get_stage_texture(crop_catalog.get_texture_key(crop_id), 3) if crop_catalog != null else null
@@ -127,7 +133,8 @@ func _make_seed_buy_button(crop_id: int) -> Button:
 
 func _make_fert_actions(fert_id: int) -> HBoxContainer:
 	var box := HBoxContainer.new()
-	box.custom_minimum_size = Vector2(136, 42)
+	box.custom_minimum_size = Vector2(0, 42)
+	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	box.add_theme_constant_override("separation", 6)
 
 	var buy := _make_action_button("购买", Color(0.25, 0.60, 0.20))

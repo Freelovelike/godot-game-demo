@@ -8,9 +8,9 @@
 
 [node name="PopupBase" type="Control" unique_id=1598225428]
 layout_mode = 3
-anchors_preset = 0
-offset_right = 1448.0
-offset_bottom = 1086.0
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 script = ExtResource("1_base")
@@ -24,7 +24,7 @@ grow_horizontal = 2
 grow_vertical = 2
 color = Color(0, 0, 0, 0.5)
 
-[node name="Center" type="CenterContainer" parent="." unique_id=519049205]
+[node name="Center" type="Control" parent="." unique_id=519049205]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
@@ -35,7 +35,12 @@ mouse_filter = 2
 
 [node name="Root" type="Control" parent="Center" unique_id=718961441]
 custom_minimum_size = Vector2(940, 620)
-layout_mode = 2
+anchors_preset = 0
+offset_left = 130.58063
+offset_top = 24.0
+offset_right = 1070.5806
+offset_bottom = 644.0
+scale = Vector2(1.083871, 1.083871)
 mouse_filter = 1
 
 [node name="Background" type="TextureRect" parent="Center/Root" unique_id=1656682871]
@@ -94,9 +99,9 @@ stretch_mode = 5
 [node name="Content" type="Control" parent="Center/Root" unique_id=1630613820]
 layout_mode = 1
 anchors_preset = 0
-offset_left = 202.0
-offset_top = 167.0
-offset_right = 743.0
+offset_left = 201.51785
+offset_top = 168.83928
+offset_right = 739.40466
 offset_bottom = 544.0
 mouse_filter = 1
 
@@ -104,15 +109,15 @@ mouse_filter = 1
 layout_mode = 1
 anchors_preset = 0
 offset_left = 10.0
-offset_right = 530.0
+offset_right = 530.506
 offset_bottom = 38.0
 mouse_filter = 1
 
 [node name="TabContent" type="Control" parent="Center/Root/Content" unique_id=1693685820]
 layout_mode = 1
 anchors_preset = 0
-offset_left = 11.0
+offset_left = 12.9166565
 offset_top = 56.0
-offset_right = 526.0
+offset_right = 524.0476
 offset_bottom = 363.0
 mouse_filter = 1
