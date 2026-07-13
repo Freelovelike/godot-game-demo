@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://efjv1pctwwb0"
-path="res://.godot/imported/ChatGPT Image 2026年7月13日 13_52_53 (2)_12.png-0143acd5c71db777140ebcb8c3daa16c.ctex"
+uid="uid://bf6wyowipl2pn"
+path="res://.godot/imported/图标_公告.png-9931ec61e23cc231c23397fd738c44f0.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/登录场景资源/ChatGPT Image 2026年7月13日 13_52_53 (2)_12.png"
-dest_files=["res://.godot/imported/ChatGPT Image 2026年7月13日 13_52_53 (2)_12.png-0143acd5c71db777140ebcb8c3daa16c.ctex"]
+source_file="res://assets/登录场景资源/图标_公告.png"
+dest_files=["res://.godot/imported/图标_公告.png-9931ec61e23cc231c23397fd738c44f0.ctex"]
 
 [params]
 
