@@ -1,13 +1,22 @@
-[gd_scene load_steps=2 format=3]
+[gd_scene format=3 uid="uid://boscl6n0n1dna"]
 
-[ext_resource type="Script" path="res://scenes/shop_overlay.gd" id="1_shop"]
+[ext_resource type="PackedScene" uid="uid://cw4eg5qag0rnb" path="res://scenes/popup_base.tscn" id="1_base"]
+[ext_resource type="Script" uid="uid://cd426eq0a4cfs" path="res://scenes/shop_overlay.gd" id="2_shop"]
+[ext_resource type="Texture2D" uid="uid://c731hvqlfrcvo" path="res://assets/sangdiansucai/商店标题.png" id="3_title"]
+[ext_resource type="PackedScene" path="res://scenes/shop_content.tscn" id="4_content"]
 
-[node name="ShopOverlay" type="Control"]
-visible = false
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-mouse_filter = 0
-script = ExtResource("1_shop")
+[node name="ShopOverlay" unique_id=413567728 instance=ExtResource("1_base")]
+script = ExtResource("2_shop")
+title_texture = ExtResource("3_title")
+
+[node name="Title" parent="Center/Root" parent_id_path=PackedInt32Array(718961441) index="1" unique_id=1051735695]
+texture = ExtResource("3_title")
+
+[node name="Content" parent="Center/Root" parent_id_path=PackedInt32Array(718961441) index="3" unique_id=1630613820]
+offset_left = 0.0
+offset_top = 0.0
+offset_right = 752.0
+offset_bottom = 356.0
+
+[node name="ShopContent" parent="Center/Root/Content" index="0" unique_id=1084467141 instance=ExtResource("4_content")]
+layout_mode = 1

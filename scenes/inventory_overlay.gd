@@ -1,6 +1,9 @@
-extends Control
+@tool
+extends PopupBase
 
-## 背包弹窗。GridContainer + ScrollContainer + 物品卡片，全部用内置节点。
+## 静态弹窗结构在 inventory_overlay.tscn 中，脚本只维护动态物品卡片。
+
+const CropAtlas = preload("res://scripts/crop_atlas.gd")
 
 var CROPS: Array = []
 var CROP_COLORS: Array = []
@@ -13,127 +16,87 @@ var inventory: Dictionary = {}:
 
 signal sell_requested(crop_id: int, amount: int)
 signal sell_all_requested
-signal closed
 
-var _grid: GridContainer = null
-var _empty_lbl: Label = null
+@onready var sell_all_button: Button = $Center/Root/Content/InventoryContent/SellAllButton
+@onready var grid: GridContainer = $Center/Root/Content/InventoryContent/ItemsScroll/ItemsGrid
+@onready var empty_label: Label = $Center/Root/Content/InventoryContent/EmptyLabel
 
-func _ready():
-	set_anchors_preset(Control.PRESET_FULL_RECT)
-	mouse_filter = Control.MOUSE_FILTER_STOP
-	_build()
-
-func _build():
-	for c in get_children():
-		c.queue_free()
-	_grid = null
-	_empty_lbl = null
-
-	var modal := UIKit.build_modal(self, Vector2(820, 560), "我的背包 (售出换金币)",
-		Color(0.35, 0.15, 0.4), Color(0.93, 0.89, 0.96), Color(0.4, 0.18, 0.45),
-		func(): closed.emit())
-	var vbox: VBoxContainer = modal[1]
-
-	# 顶部操作栏：全部卖出
-	var topbar := HBoxContainer.new()
-	topbar.alignment = BoxContainer.ALIGNMENT_END
-	vbox.add_child(topbar)
-	var sell_all := UIKit.make_button("全部卖出", Color(0.65, 0.28, 0.18), Color(0.45, 0.18, 0.1), 15)
-	sell_all.pressed.connect(func(): sell_all_requested.emit())
-	topbar.add_child(sell_all)
-
-	# 滚动区 + 网格
-	var scroll := ScrollContainer.new()
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	vbox.add_child(scroll)
-
-	_grid = GridContainer.new()
-	_grid.columns = 5
-	_grid.add_theme_constant_override("h_separation", 12)
-	_grid.add_theme_constant_override("v_separation", 12)
-	_grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	scroll.add_child(_grid)
-
-	_empty_lbl = UIKit.make_label("背包是空的", 20, Color(0.5, 0.4, 0.6), HORIZONTAL_ALIGNMENT_CENTER)
-	_empty_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	vbox.add_child(_empty_lbl)
-
+func _ready() -> void:
+	super._ready()
+	sell_all_button.pressed.connect(func(): sell_all_requested.emit())
+	_style_sell_all_button()
 	_rebuild_items()
 
-func _rebuild_items():
-	if _grid == null:
+func _style_sell_all_button() -> void:
+	sell_all_button.add_theme_stylebox_override("normal", UIKit.button_box(Color(0.72, 0.32, 0.12), Color(0.48, 0.18, 0.06)))
+	sell_all_button.add_theme_stylebox_override("hover", UIKit.button_box(Color(0.82, 0.4, 0.15), Color(0.48, 0.18, 0.06)))
+	sell_all_button.add_theme_stylebox_override("pressed", UIKit.button_box(Color(0.55, 0.22, 0.08), Color(0.4, 0.14, 0.04)))
+
+func _rebuild_items() -> void:
+	if grid == null:
 		return
-	for c in _grid.get_children():
-		c.queue_free()
+	for child in grid.get_children():
+		child.queue_free()
 
 	var has_any := false
 	for cid in inventory.keys():
-		var cnt := int(inventory.get(cid, 0))
-		if cnt <= 0:
+		var count := int(inventory.get(cid, 0))
+		if count <= 0:
 			continue
 		has_any = true
-		_grid.add_child(_make_card(int(cid), cnt))
+		grid.add_child(_make_card(int(cid), count))
 
-	if _empty_lbl:
-		_empty_lbl.visible = not has_any
+	empty_label.visible = not has_any
 
-func _make_card(cid: int, cnt: int) -> Control:
+func _make_card(crop_id: int, count: int) -> Control:
 	var card := PanelContainer.new()
-	card.custom_minimum_size = Vector2(150, 0)
-	card.add_theme_stylebox_override("panel", UIKit.card_box(Color(0.86, 0.81, 0.91), Color(0.5, 0.3, 0.55)))
+	card.custom_minimum_size = Vector2(140, 0)
+	card.add_theme_stylebox_override("panel", UIKit.card_box(Color(1.0, 0.87, 0.6), Color(0.55, 0.28, 0.08)))
 
-	var m := MarginContainer.new()
-	m.add_theme_constant_override("margin_left", 8)
-	m.add_theme_constant_override("margin_right", 8)
-	m.add_theme_constant_override("margin_top", 8)
-	m.add_theme_constant_override("margin_bottom", 8)
-	card.add_child(m)
+	var margin := MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 8)
+	margin.add_theme_constant_override("margin_right", 8)
+	margin.add_theme_constant_override("margin_top", 8)
+	margin.add_theme_constant_override("margin_bottom", 8)
+	card.add_child(margin)
 
 	var box := VBoxContainer.new()
 	box.add_theme_constant_override("separation", 4)
-	m.add_child(box)
+	margin.add_child(box)
 
-	# 色块图标
-	var icon := ColorRect.new()
-	icon.custom_minimum_size = Vector2(0, 40)
-	icon.color = _crop_color(cid, 1)
+	var icon := TextureRect.new()
+	icon.custom_minimum_size = Vector2(0, 54)
+	icon.expand_mode = TextureRect.EXPAND_FIT_WIDTH_PROPORTIONAL
+	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	if crop_catalog != null and crop_catalog.is_valid_id(crop_id):
+		icon.texture = CropAtlas.get_stage_texture(crop_catalog.get_texture_key(crop_id), 3)
 	box.add_child(icon)
 
-	box.add_child(UIKit.make_label(_crop_name(cid), 16, Color(0.1, 0.1, 0.2), HORIZONTAL_ALIGNMENT_CENTER))
-	box.add_child(UIKit.make_label("数量: " + str(cnt), 14, Color(0.3, 0.2, 0.4), HORIZONTAL_ALIGNMENT_CENTER))
+	box.add_child(UIKit.make_label(_crop_name(crop_id), 16, Color(0.18, 0.08, 0.02), HORIZONTAL_ALIGNMENT_CENTER))
+	box.add_child(UIKit.make_label("数量: " + str(count), 14, Color(0.34, 0.18, 0.06), HORIZONTAL_ALIGNMENT_CENTER))
 
-	# 卖出按钮行
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 6)
 	box.add_child(row)
-	var sell1 := UIKit.make_button("卖出", Color(0.8, 0.6, 0.1), Color(0.55, 0.4, 0.05), 13)
-	sell1.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	sell1.pressed.connect(func(): sell_requested.emit(cid, 1))
-	row.add_child(sell1)
-	var sellall := UIKit.make_button("全卖", Color(0.65, 0.28, 0.18), Color(0.45, 0.18, 0.1), 13)
-	sellall.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	sellall.pressed.connect(func(): sell_requested.emit(cid, cnt))
-	row.add_child(sellall)
+	var sell_one := UIKit.make_button("卖出", Color(0.8, 0.58, 0.08), Color(0.55, 0.36, 0.03), 13)
+	sell_one.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	sell_one.pressed.connect(func(): sell_requested.emit(crop_id, 1))
+	row.add_child(sell_one)
+	var sell_all := UIKit.make_button("全卖", Color(0.68, 0.28, 0.12), Color(0.45, 0.16, 0.06), 13)
+	sell_all.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	sell_all.pressed.connect(func(): sell_requested.emit(crop_id, count))
+	row.add_child(sell_all)
 
-	if _crop_is_valid(cid):
-		var price := "x" + str(_crop_unit_sell(cid)) + " 金/个"
-		box.add_child(UIKit.make_label(price, 11, Color(0.5, 0.4, 0.1), HORIZONTAL_ALIGNMENT_CENTER))
+	if _crop_is_valid(crop_id):
+		box.add_child(UIKit.make_label("x" + str(_crop_unit_sell(crop_id)) + " 金/个", 11, Color(0.48, 0.32, 0.04), HORIZONTAL_ALIGNMENT_CENTER))
 
 	return card
 
-func _crop_is_valid(cid: int) -> bool:
-	return crop_catalog.is_valid_id(cid) if crop_catalog != null else cid >= 0 and CROPS.size() > cid
+func _crop_is_valid(crop_id: int) -> bool:
+	return crop_catalog.is_valid_id(crop_id) if crop_catalog != null else crop_id >= 0 and CROPS.size() > crop_id
 
-func _crop_name(cid: int) -> String:
-	return crop_catalog.get_name(cid) if crop_catalog != null else (str(CROPS[cid][0]) if cid >= 0 and CROPS.size() > cid else "作物" + str(cid))
+func _crop_name(crop_id: int) -> String:
+	return crop_catalog.get_name(crop_id) if crop_catalog != null else (str(CROPS[crop_id][0]) if crop_id >= 0 and CROPS.size() > crop_id else "作物" + str(crop_id))
 
-func _crop_unit_sell(cid: int) -> int:
-	return crop_catalog.get_unit_sell(cid) if crop_catalog != null else (int(CROPS[cid][6]) if cid >= 0 and CROPS.size() > cid else 0)
-
-func _crop_color(cid: int, color_index: int) -> Color:
-	if cid >= 0 and cid < CROP_COLORS.size():
-		var colors = CROP_COLORS[cid]
-		if colors is Array and color_index >= 0 and color_index < colors.size():
-			return colors[color_index]
-	return Color(0.42, 0.76, 0.34) if color_index == 0 else Color(0.72, 0.96, 0.46)
+func _crop_unit_sell(crop_id: int) -> int:
+	return crop_catalog.get_unit_sell(crop_id) if crop_catalog != null else (int(CROPS[crop_id][6]) if crop_id >= 0 and CROPS.size() > crop_id else 0)

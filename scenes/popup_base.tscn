@@ -1,0 +1,77 @@
+[gd_scene format=3 uid="uid://cw4eg5qag0rnb"]
+
+[ext_resource type="Script" uid="uid://ctuggeckj2htc" path="res://scenes/popup_base.gd" id="1_base"]
+[ext_resource type="Texture2D" uid="uid://csaa1ft14hav7" path="res://assets/sangdiansucai/公共弹窗背景.png" id="2_bg"]
+[ext_resource type="Texture2D" uid="uid://5idcq31j3xcc" path="res://assets/sangdiansucai/商店关闭按钮.png" id="3_close"]
+
+[node name="PopupBase" type="Control" unique_id=1598225428]
+layout_mode = 3
+anchors_preset = 0
+offset_right = 1448.0
+offset_bottom = 1086.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_base")
+
+[node name="Shade" type="ColorRect" parent="." unique_id=159587864]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0, 0, 0, 0.5)
+
+[node name="Center" type="CenterContainer" parent="." unique_id=519049205]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="Root" type="Control" parent="Center" unique_id=718961441]
+custom_minimum_size = Vector2(940, 620)
+layout_mode = 2
+mouse_filter = 1
+
+[node name="Background" type="TextureRect" parent="Center/Root" unique_id=1656682871]
+layout_mode = 1
+offset_top = 45.0
+offset_right = 940.0
+offset_bottom = 570.0
+mouse_filter = 2
+texture = ExtResource("2_bg")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Title" type="TextureRect" parent="Center/Root" unique_id=1051735695]
+layout_mode = 1
+offset_left = 235.0
+offset_top = 75.0
+offset_right = 409.0
+offset_bottom = 119.0
+mouse_filter = 2
+expand_mode = 1
+stretch_mode = 5
+
+[node name="CloseButton" type="TextureButton" parent="Center/Root" unique_id=1331271750]
+layout_mode = 1
+offset_left = 720.0
+offset_top = 111.0
+offset_right = 786.0
+offset_bottom = 177.0
+scale = Vector2(0.7, 0.7)
+texture_normal = ExtResource("3_close")
+ignore_texture_size = true
+stretch_mode = 5
+
+[node name="Content" type="Control" parent="Center/Root" unique_id=1630613820]
+layout_mode = 1
+anchors_preset = 0
+offset_left = 214.0
+offset_top = 224.0
+offset_right = 726.0
+offset_bottom = 530.0
+mouse_filter = 1

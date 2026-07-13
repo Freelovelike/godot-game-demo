@@ -1,4 +1,5 @@
-extends Control
+@tool
+extends PopupBase
 
 const CropAtlas = preload("res://scripts/crop_atlas.gd")
 
@@ -23,49 +24,34 @@ var selected_fertilizer: int = -1:
 signal fertilizer_selected(index: int)
 signal fertilizer_buy_requested(fert_id: int)
 signal seed_buy_requested(crop_id: int)
-signal closed
 
 const FERT_DESC := ["生长-8%", "生长-12%", "生长-18%", "2h不缺水", "2h不生虫", "2h不长草", "产量+10%"]
 
-@onready var shade: ColorRect = get_node_or_null("Shade")
-@onready var seed_button: BaseButton = _find_button("Root/SeedButtonClip/SeedButton", "Root/SeedButton")
-@onready var fert_button: BaseButton = _find_button("Root/FertButtonClip/FertButton", "Root/FertButton")
-@onready var close_button: BaseButton = get_node_or_null("Root/CloseButton")
-@onready var seed_table: GridContainer = get_node_or_null("Root/SeedTable")
-@onready var fert_table: GridContainer = get_node_or_null("Root/FertTable")
+@onready var seed_button: BaseButton = $Center/Root/Content/ShopContent/SeedButtonClip/SeedButton
+@onready var fert_button: BaseButton = $Center/Root/Content/ShopContent/FertButtonClip/FertButton
+@onready var seed_scroll: ScrollContainer = $Center/Root/Content/ShopContent/SeedScroll
+@onready var fert_scroll: ScrollContainer = $Center/Root/Content/ShopContent/FertScroll
+@onready var seed_table: GridContainer = $Center/Root/Content/ShopContent/SeedScroll/SeedTable
+@onready var fert_table: GridContainer = $Center/Root/Content/ShopContent/FertScroll/FertTable
 
 var _current_tab := 0
 var _ready_done := false
 
-func _find_button(primary_path: String, fallback_path: String) -> BaseButton:
-	var button := get_node_or_null(primary_path) as BaseButton
-	if button:
-		return button
-	return get_node_or_null(fallback_path) as BaseButton
-
 func _ready() -> void:
-	set_anchors_preset(Control.PRESET_FULL_RECT)
-	mouse_filter = Control.MOUSE_FILTER_STOP
+	super._ready()
 	_ready_done = true
 
-	if shade:
-		shade.mouse_filter = Control.MOUSE_FILTER_STOP
-		shade.gui_input.connect(_on_shade_input)
-	if close_button:
-		close_button.pressed.connect(func(): closed.emit())
-	if seed_button:
-		seed_button.pressed.connect(func(): _set_tab(0))
-	if fert_button:
-		fert_button.pressed.connect(func(): _set_tab(1))
+	seed_button.pressed.connect(func(): _set_tab(0))
+	fert_button.pressed.connect(func(): _set_tab(1))
 
 	_refresh()
 
 func _set_tab(index: int) -> void:
 	_current_tab = index
-	if seed_table:
-		seed_table.visible = index == 0
-	if fert_table:
-		fert_table.visible = index == 1
+	if seed_scroll:
+		seed_scroll.visible = index == 0
+	if fert_scroll:
+		fert_scroll.visible = index == 1
 	if seed_button:
 		seed_button.disabled = index == 0
 	if fert_button:
@@ -190,11 +176,6 @@ func _button_box(color: Color) -> StyleBoxFlat:
 func _clear_children(parent: Node) -> void:
 	for child in parent.get_children():
 		child.queue_free()
-
-func _on_shade_input(event: InputEvent) -> void:
-	var mb := event as InputEventMouseButton
-	if mb and mb.pressed and mb.button_index == MOUSE_BUTTON_LEFT:
-		closed.emit()
 
 func _crop_name(i: int) -> String:
 	return crop_catalog.get_name(i) if crop_catalog != null else (str(CROPS[i][0]) if i >= 0 and CROPS.size() > i else "作物" + str(i))
