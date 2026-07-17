@@ -214,3 +214,15 @@
 [CodeGraph] File watcher error {
   error: "Error: EBUSY: resource busy or locked, watch 'C:\\Users\\sisui\\Desktop\\godot\\godot-game-demo\\scenes\\popup_base.tscn3051311595.tmp'"
 }
+[CodeGraph daemon] Listening on \\.\pipe\codegraph-9ebd62b7951d039e (pid 44840, v1.0.1). Idle timeout 300000ms.
+[CodeGraph MCP] File watcher active — graph will auto-sync on changes
+[CodeGraph daemon] Listening on \\.\pipe\codegraph-9ebd62b7951d039e (pid 46756, v1.0.1). Idle timeout 300000ms.
+[CodeGraph MCP] File watcher active — graph will auto-sync on changes
+[CodeGraph daemon] Shutting down (inactivity backstop; clients=4).
+[CodeGraph daemon] Listening on \\.\pipe\codegraph-9ebd62b7951d039e (pid 32452, v1.0.1). Idle timeout 300000ms.
+[CodeGraph MCP] File watcher active — graph will auto-sync on changes
+[CodeGraph daemon] Listening on \\.\pipe\codegraph-9ebd62b7951d039e (pid 46900, v1.0.1). Idle timeout 300000ms.
+[CodeGraph MCP] File watcher active — graph will auto-sync on changes
+[CodeGraph daemon] Shutting down (inactivity backstop; clients=1).
+[CodeGraph daemon] Listening on \\.\pipe\codegraph-9ebd62b7951d039e (pid 56288, v1.0.1). Idle timeout 300000ms.
+[CodeGraph MCP] File watcher active — graph will auto-sync on changes

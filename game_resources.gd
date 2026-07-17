@@ -8,4 +8,3 @@ func store(path: String, resource: Resource) -> void:
 
 func get_resource(path: String) -> Resource:
 	return cache.get(path)
-

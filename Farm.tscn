@@ -7,6 +7,7 @@
 [ext_resource type="Script" uid="uid://b1g2altukveho" path="res://scripts/plot_anchor_preview.gd" id="3_xqpul"]
 [ext_resource type="Script" uid="uid://beyp1oibeun62" path="res://scenes/settings_overlay.gd" id="6_set"]
 [ext_resource type="Script" uid="uid://c7oss3wsofpr2" path="res://scenes/ui_overlay.gd" id="7_ui"]
+[ext_resource type="Script" path="res://scripts/farm_dog.gd" id="8_dog"]
 
 [node name="Farm" type="Node2D" unique_id=1337986768]
 script = ExtResource("1_farm")
@@ -773,6 +774,12 @@ default_color = Color(0.38, 0.22, 0.1, 0.95)
 z_index = -100
 texture = ExtResource("2_o1bn1")
 centered = false
+
+[node name="FarmDog" type="AnimatedSprite2D" parent="WorldRoot"]
+z_index = 20
+position = Vector2(1120, 700)
+scale = Vector2(0.32, 0.32)
+script = ExtResource("8_dog")
 
 [node name="PlotPreview" type="Node2D" parent="WorldRoot" unique_id=1352123784]
 z_index = 100
