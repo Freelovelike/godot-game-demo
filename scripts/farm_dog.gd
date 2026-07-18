@@ -60,14 +60,11 @@ const FRAME_TEXTURES := {
 		preload("res://assets/帧动画/趴地动画/sprite-04-lying_6.png"),
 	],
 }
-var _walk_points := PackedVector2Array([
-	Vector2(1120.0, 700.0),
-	Vector2(1240.0, 760.0),
-	Vector2(1160.0, 830.0),
-	Vector2(1040.0, 790.0),
-])
-const WALK_SPEED := 62.0
 const LIE_HOLD_SECONDS := 3.0
+
+@export_category("移动设置")
+@export_node_path("Node2D") var walk_points_path: NodePath = ^"../DogWalkArea"
+@export_range(10.0, 300.0, 1.0) var walk_speed := 62.0
 
 @export_category("编辑器预览")
 @export_enum("待机 / 摇尾", "移动", "叫", "趴下") var preview_action: int = PreviewAction.IDLE:
@@ -80,6 +77,7 @@ var _rng := RandomNumberGenerator.new()
 var _target_index := 0
 var _wait_time := 0.0
 var _walking := false
+var _walk_points := PackedVector2Array()
 
 
 func _ready() -> void:
@@ -88,6 +86,7 @@ func _ready() -> void:
 	if Engine.is_editor_hint():
 		_apply_editor_preview()
 		return
+	_load_walk_points()
 	_rng.randomize()
 	_start_idle()
 
@@ -144,7 +143,7 @@ func _apply_editor_preview() -> void:
 func _walk_toward_target(delta: float) -> void:
 	var target := _walk_points[_target_index]
 	flip_h = target.x < position.x
-	position = position.move_toward(target, WALK_SPEED * delta)
+	position = position.move_toward(target, walk_speed * delta)
 	if position.distance_squared_to(target) < 1.0:
 		position = target
 		_walking = false
@@ -166,6 +165,9 @@ func _choose_next_action() -> void:
 
 
 func _start_walking() -> void:
+	if _walk_points.size() < 2:
+		_start_idle()
+		return
 	var next_index := _rng.randi_range(0, _walk_points.size() - 2)
 	if next_index >= _target_index:
 		next_index += 1
@@ -178,6 +180,23 @@ func _start_idle() -> void:
 	_walking = false
 	_wait_time = _rng.randf_range(2.2, 5.0)
 	play(&"idle")
+
+
+func _load_walk_points() -> void:
+	_walk_points.clear()
+	var points_root := get_node_or_null(walk_points_path) as Node2D
+	var movement_space := get_parent() as Node2D
+	if points_root == null or movement_space == null:
+		push_warning("FarmDog 没有找到移动范围节点：%s" % walk_points_path)
+		return
+
+	for child in points_root.get_children():
+		var marker := child as Marker2D
+		if marker != null:
+			_walk_points.append(movement_space.to_local(marker.global_position))
+
+	if _walk_points.size() < 2:
+		push_warning("DogWalkArea 至少需要两个 Marker2D 路点")
 
 
 func _on_animation_finished() -> void:

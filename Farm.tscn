@@ -11,6 +11,7 @@
 [ext_resource type="Texture2D" uid="uid://dmygxuhb28fre" path="res://assets/帧动画/哄叫动画/sprite-01-barking_3.png" id="7_eue6b"]
 [ext_resource type="Script" uid="uid://c7oss3wsofpr2" path="res://scenes/ui_overlay.gd" id="7_ui"]
 [ext_resource type="Script" uid="uid://bb78wkrhiy44e" path="res://scripts/farm_dog.gd" id="8_dog"]
+[ext_resource type="Script" path="res://scripts/dog_walk_area.gd" id="9_dog_walk_area"]
 [ext_resource type="Texture2D" uid="uid://egqf2jf5lvuq" path="res://assets/帧动画/哄叫动画/sprite-01-barking_4.png" id="8_eig3w"]
 [ext_resource type="Texture2D" uid="uid://sq1v5e52sqkh" path="res://assets/帧动画/哄叫动画/sprite-01-barking_5.png" id="9_481vk"]
 [ext_resource type="Texture2D" uid="uid://b7vl8yui1ngx" path="res://assets/帧动画/哄叫动画/sprite-01-barking_6.png" id="10_kgm03"]
@@ -894,14 +895,31 @@ z_index = -100
 texture = ExtResource("2_o1bn1")
 centered = false
 
+[node name="DogWalkArea" type="Node2D" parent="WorldRoot"]
+editor_description = "在 2D 场景中拖动下面的 WalkPoint 节点，即可调整狗狗移动范围。"
+script = ExtResource("9_dog_walk_area")
+
+[node name="WalkPoint01" type="Marker2D" parent="WorldRoot/DogWalkArea"]
+position = Vector2(1120, 700)
+
+[node name="WalkPoint02" type="Marker2D" parent="WorldRoot/DogWalkArea"]
+position = Vector2(1240, 760)
+
+[node name="WalkPoint03" type="Marker2D" parent="WorldRoot/DogWalkArea"]
+position = Vector2(1160, 830)
+
+[node name="WalkPoint04" type="Marker2D" parent="WorldRoot/DogWalkArea"]
+position = Vector2(1040, 790)
+
 [node name="FarmDog" type="AnimatedSprite2D" parent="WorldRoot" unique_id=1116239396]
 z_index = 20
-position = Vector2(210, 432)
+position = Vector2(1120, 700)
 scale = Vector2(0.32, 0.32)
 sprite_frames = SubResource("SpriteFrames_g8u57")
 animation = &"move"
 frame_progress = 0.884952
 script = ExtResource("8_dog")
+walk_points_path = NodePath("../DogWalkArea")
 
 [node name="PlotPreview" type="Node2D" parent="WorldRoot" unique_id=1352123784]
 z_index = 100
