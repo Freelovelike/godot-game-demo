@@ -5,9 +5,128 @@
 [ext_resource type="Script" uid="uid://cvqrvr61gl6bb" path="res://scripts/plot_anchor_tile.gd" id="2_xqpul"]
 [ext_resource type="Texture2D" uid="uid://c757hbirnn8dc" path="res://assets/land/land_yellow_dry.png" id="3_x7wqs"]
 [ext_resource type="Script" uid="uid://b1g2altukveho" path="res://scripts/plot_anchor_preview.gd" id="3_xqpul"]
+[ext_resource type="Texture2D" uid="uid://clm1rer03augy" path="res://assets/帧动画/哄叫动画/sprite-01-barking_1.png" id="5_e7xdl"]
+[ext_resource type="Texture2D" uid="uid://dp3dtmplf66xj" path="res://assets/帧动画/哄叫动画/sprite-01-barking_2.png" id="6_ok44o"]
 [ext_resource type="Script" uid="uid://beyp1oibeun62" path="res://scenes/settings_overlay.gd" id="6_set"]
+[ext_resource type="Texture2D" uid="uid://dmygxuhb28fre" path="res://assets/帧动画/哄叫动画/sprite-01-barking_3.png" id="7_eue6b"]
 [ext_resource type="Script" uid="uid://c7oss3wsofpr2" path="res://scenes/ui_overlay.gd" id="7_ui"]
-[ext_resource type="Script" path="res://scripts/farm_dog.gd" id="8_dog"]
+[ext_resource type="Script" uid="uid://bb78wkrhiy44e" path="res://scripts/farm_dog.gd" id="8_dog"]
+[ext_resource type="Texture2D" uid="uid://egqf2jf5lvuq" path="res://assets/帧动画/哄叫动画/sprite-01-barking_4.png" id="8_eig3w"]
+[ext_resource type="Texture2D" uid="uid://sq1v5e52sqkh" path="res://assets/帧动画/哄叫动画/sprite-01-barking_5.png" id="9_481vk"]
+[ext_resource type="Texture2D" uid="uid://b7vl8yui1ngx" path="res://assets/帧动画/哄叫动画/sprite-01-barking_6.png" id="10_kgm03"]
+[ext_resource type="Texture2D" uid="uid://ds48t31vagkm" path="res://assets/帧动画/待机动画/sprite-02-idle-tail_1.png" id="11_lwncc"]
+[ext_resource type="Texture2D" uid="uid://vxqglqyvdkpr" path="res://assets/帧动画/待机动画/sprite-02-idle-tail_2.png" id="12_6wy8m"]
+[ext_resource type="Texture2D" uid="uid://ca7d3hfwjpy2w" path="res://assets/帧动画/待机动画/sprite-02-idle-tail_3.png" id="13_vlrnx"]
+[ext_resource type="Texture2D" uid="uid://bd1maomsv5vrs" path="res://assets/帧动画/待机动画/sprite-02-idle-tail_4.png" id="14_7gnra"]
+[ext_resource type="Texture2D" uid="uid://dxo6lgc0j7xq2" path="res://assets/帧动画/待机动画/sprite-02-idle-tail_5.png" id="15_jnhk8"]
+[ext_resource type="Texture2D" uid="uid://xjc0yk4cetf7" path="res://assets/帧动画/待机动画/sprite-02-idle-tail_6.png" id="16_hj6rk"]
+[ext_resource type="Texture2D" uid="uid://dfmx3xtw2jevx" path="res://assets/帧动画/趴地动画/sprite-04-lying_1.png" id="17_e2mn1"]
+[ext_resource type="Texture2D" uid="uid://bu4gm70dnismm" path="res://assets/帧动画/趴地动画/sprite-04-lying_2.png" id="18_ayrct"]
+[ext_resource type="Texture2D" uid="uid://desoyua1evubr" path="res://assets/帧动画/趴地动画/sprite-04-lying_3.png" id="19_ije3y"]
+[ext_resource type="Texture2D" uid="uid://d1avtufb4os7q" path="res://assets/帧动画/趴地动画/sprite-04-lying_4.png" id="20_thtsv"]
+[ext_resource type="Texture2D" uid="uid://btmh7hy06t5u4" path="res://assets/帧动画/趴地动画/sprite-04-lying_5.png" id="21_bcuxq"]
+[ext_resource type="Texture2D" uid="uid://cyb804oq05wix" path="res://assets/帧动画/趴地动画/sprite-04-lying_6.png" id="22_qlwwu"]
+[ext_resource type="Texture2D" uid="uid://w1gnuvhoi7pl" path="res://assets/帧动画/奔跑动画/sprite-03-moving_1.png" id="23_nkqqk"]
+[ext_resource type="Texture2D" uid="uid://dc0rswhumo3x7" path="res://assets/帧动画/奔跑动画/sprite-03-moving_2.png" id="24_o1ypc"]
+[ext_resource type="Texture2D" uid="uid://d206ouhu3ofbc" path="res://assets/帧动画/奔跑动画/sprite-03-moving_3.png" id="25_u7e46"]
+[ext_resource type="Texture2D" uid="uid://cgycfh1knyuob" path="res://assets/帧动画/奔跑动画/sprite-03-moving_4.png" id="26_uwplv"]
+[ext_resource type="Texture2D" uid="uid://t01qpouwinmy" path="res://assets/帧动画/奔跑动画/sprite-03-moving_5.png" id="27_0griv"]
+[ext_resource type="Texture2D" uid="uid://37jxyepxjsi8" path="res://assets/帧动画/奔跑动画/sprite-03-moving_6.png" id="28_o70dh"]
+
+[sub_resource type="SpriteFrames" id="SpriteFrames_g8u57"]
+animations = [{
+"frames": [{
+"duration": 1.0,
+"texture": ExtResource("5_e7xdl")
+}, {
+"duration": 1.0,
+"texture": ExtResource("6_ok44o")
+}, {
+"duration": 1.0,
+"texture": ExtResource("7_eue6b")
+}, {
+"duration": 1.0,
+"texture": ExtResource("8_eig3w")
+}, {
+"duration": 1.0,
+"texture": ExtResource("9_481vk")
+}, {
+"duration": 1.0,
+"texture": ExtResource("10_kgm03")
+}],
+"loop": false,
+"name": &"bark",
+"speed": 5.0
+}, {
+"frames": [{
+"duration": 1.0,
+"texture": ExtResource("11_lwncc")
+}, {
+"duration": 1.0,
+"texture": ExtResource("12_6wy8m")
+}, {
+"duration": 1.0,
+"texture": ExtResource("13_vlrnx")
+}, {
+"duration": 1.0,
+"texture": ExtResource("14_7gnra")
+}, {
+"duration": 1.0,
+"texture": ExtResource("15_jnhk8")
+}, {
+"duration": 1.0,
+"texture": ExtResource("16_hj6rk")
+}],
+"loop": true,
+"name": &"idle",
+"speed": 4.0
+}, {
+"frames": [{
+"duration": 1.0,
+"texture": ExtResource("17_e2mn1")
+}, {
+"duration": 1.0,
+"texture": ExtResource("18_ayrct")
+}, {
+"duration": 1.0,
+"texture": ExtResource("19_ije3y")
+}, {
+"duration": 1.0,
+"texture": ExtResource("20_thtsv")
+}, {
+"duration": 1.0,
+"texture": ExtResource("21_bcuxq")
+}, {
+"duration": 1.0,
+"texture": ExtResource("22_qlwwu")
+}],
+"loop": false,
+"name": &"lie",
+"speed": 3.5
+}, {
+"frames": [{
+"duration": 2.0,
+"texture": ExtResource("23_nkqqk")
+}, {
+"duration": 1.0,
+"texture": ExtResource("24_o1ypc")
+}, {
+"duration": 1.0,
+"texture": ExtResource("25_u7e46")
+}, {
+"duration": 1.0,
+"texture": ExtResource("26_uwplv")
+}, {
+"duration": 1.0,
+"texture": ExtResource("27_0griv")
+}, {
+"duration": 1.0,
+"texture": ExtResource("28_o70dh")
+}],
+"loop": true,
+"name": &"move",
+"speed": 12.0
+}]
 
 [node name="Farm" type="Node2D" unique_id=1337986768]
 script = ExtResource("1_farm")
@@ -775,10 +894,13 @@ z_index = -100
 texture = ExtResource("2_o1bn1")
 centered = false
 
-[node name="FarmDog" type="AnimatedSprite2D" parent="WorldRoot"]
+[node name="FarmDog" type="AnimatedSprite2D" parent="WorldRoot" unique_id=1116239396]
 z_index = 20
-position = Vector2(1120, 700)
+position = Vector2(210, 432)
 scale = Vector2(0.32, 0.32)
+sprite_frames = SubResource("SpriteFrames_g8u57")
+animation = &"move"
+frame_progress = 0.884952
 script = ExtResource("8_dog")
 
 [node name="PlotPreview" type="Node2D" parent="WorldRoot" unique_id=1352123784]

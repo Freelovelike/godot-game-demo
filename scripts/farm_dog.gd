@@ -18,12 +18,30 @@ const FRAME_TEXTURES := {
 		preload("res://assets/帧动画/待机动画/sprite-02-idle-tail_6.png"),
 	],
 	&"move": [
-		preload("res://assets/帧动画/奔跑动画/sprite-03-moving_1.png"),
-		preload("res://assets/帧动画/奔跑动画/sprite-03-moving_2.png"),
-		preload("res://assets/帧动画/奔跑动画/sprite-03-moving_3.png"),
-		preload("res://assets/帧动画/奔跑动画/sprite-03-moving_4.png"),
-		preload("res://assets/帧动画/奔跑动画/sprite-03-moving_5.png"),
-		preload("res://assets/帧动画/奔跑动画/sprite-03-moving_6.png"),
+		preload("res://assets/帧动画/奔跑动画24帧/dog_run_01.png"),
+		preload("res://assets/帧动画/奔跑动画24帧/dog_run_02.png"),
+		preload("res://assets/帧动画/奔跑动画24帧/dog_run_03.png"),
+		preload("res://assets/帧动画/奔跑动画24帧/dog_run_04.png"),
+		preload("res://assets/帧动画/奔跑动画24帧/dog_run_05.png"),
+		preload("res://assets/帧动画/奔跑动画24帧/dog_run_06.png"),
+		preload("res://assets/帧动画/奔跑动画24帧/dog_run_07.png"),
+		preload("res://assets/帧动画/奔跑动画24帧/dog_run_08.png"),
+		preload("res://assets/帧动画/奔跑动画24帧/dog_run_09.png"),
+		preload("res://assets/帧动画/奔跑动画24帧/dog_run_10.png"),
+		preload("res://assets/帧动画/奔跑动画24帧/dog_run_11.png"),
+		preload("res://assets/帧动画/奔跑动画24帧/dog_run_12.png"),
+		preload("res://assets/帧动画/奔跑动画24帧/dog_run_13.png"),
+		preload("res://assets/帧动画/奔跑动画24帧/dog_run_14.png"),
+		preload("res://assets/帧动画/奔跑动画24帧/dog_run_15.png"),
+		preload("res://assets/帧动画/奔跑动画24帧/dog_run_16.png"),
+		preload("res://assets/帧动画/奔跑动画24帧/dog_run_17.png"),
+		preload("res://assets/帧动画/奔跑动画24帧/dog_run_18.png"),
+		preload("res://assets/帧动画/奔跑动画24帧/dog_run_19.png"),
+		preload("res://assets/帧动画/奔跑动画24帧/dog_run_20.png"),
+		preload("res://assets/帧动画/奔跑动画24帧/dog_run_21.png"),
+		preload("res://assets/帧动画/奔跑动画24帧/dog_run_22.png"),
+		preload("res://assets/帧动画/奔跑动画24帧/dog_run_23.png"),
+		preload("res://assets/帧动画/奔跑动画24帧/dog_run_24.png"),
 	],
 	&"bark": [
 		preload("res://assets/帧动画/哄叫动画/sprite-01-barking_1.png"),
@@ -49,6 +67,7 @@ var _walk_points := PackedVector2Array([
 	Vector2(1040.0, 790.0),
 ])
 const WALK_SPEED := 62.0
+const LIE_HOLD_SECONDS := 3.0
 
 @export_category("编辑器预览")
 @export_enum("待机 / 摇尾", "移动", "叫", "趴下") var preview_action: int = PreviewAction.IDLE:
@@ -89,9 +108,9 @@ func _build_sprite_frames() -> SpriteFrames:
 	var frames := SpriteFrames.new()
 	frames.remove_animation(&"default")
 	_add_frame_animation(frames, &"idle", FRAME_TEXTURES[&"idle"], 4.0, true)
-	_add_frame_animation(frames, &"move", FRAME_TEXTURES[&"move"], 7.0, true)
+	_add_frame_animation(frames, &"move", FRAME_TEXTURES[&"move"], 8.0, true)
 	_add_frame_animation(frames, &"bark", FRAME_TEXTURES[&"bark"], 5.0, false)
-	_add_frame_animation(frames, &"lie", FRAME_TEXTURES[&"lie"], 3.5, false)
+	_add_frame_animation(frames, &"lie", FRAME_TEXTURES[&"lie"], 3.5, false, 2, LIE_HOLD_SECONDS)
 	return frames
 
 
@@ -100,13 +119,17 @@ func _add_frame_animation(
 		animation_name: StringName,
 		textures: Array,
 		fps: float,
-		loops: bool
+		loops: bool,
+		hold_frame_index: int = -1,
+		hold_seconds: float = 0.0
 ) -> void:
 	frames.add_animation(animation_name)
 	frames.set_animation_speed(animation_name, fps)
 	frames.set_animation_loop(animation_name, loops)
-	for texture: Texture2D in textures:
-		frames.add_frame(animation_name, texture)
+	for frame_index in textures.size():
+		var texture: Texture2D = textures[frame_index]
+		var relative_duration := fps * hold_seconds if frame_index == hold_frame_index else 1.0
+		frames.add_frame(animation_name, texture, relative_duration)
 
 
 func _apply_editor_preview() -> void:
@@ -114,7 +137,7 @@ func _apply_editor_preview() -> void:
 		return
 	var preview_names: Array[StringName] = [&"idle", &"move", &"bark", &"lie"]
 	var preview_name := preview_names[clampi(preview_action, 0, preview_names.size() - 1)]
-	sprite_frames.set_animation_loop(preview_name, true)
+	sprite_frames.set_animation_loop(preview_name, preview_name != &"lie")
 	play(preview_name)
 
 
